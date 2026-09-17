@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     DOCKER_LLM_PROVIDER: str = "ollama"  # "ollama" or "gemini"
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_API_BASE: str = "https://generativelanguage.googleapis.com/v1beta"
-    GEMINI_MODEL_NAME: str = "gemini-2.5-flash"
+    GEMINI_MODEL_NAME: str = "gemini-3.6-flash"
     GEMINI_MAX_OUTPUT_TOKENS: int = 8192
     GEMINI_FALLBACK_MODEL_NAME: Optional[str] = None
     
