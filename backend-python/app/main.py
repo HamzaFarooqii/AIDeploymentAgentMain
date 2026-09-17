@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config.database import db
@@ -84,11 +85,31 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "database": "connected",
-        "environment": settings.ENVIRONMENT,
-    }
+    # Reuse the same ping check Database.connect_db() performs at startup
+    # (see app/config/database.py) so this endpoint reflects the *actual*
+    # live state of the MongoDB connection instead of assuming it's up.
+    try:
+        await db.client.admin.command("ping")
+        db_status = "connected"
+        overall_status = "healthy"
+        status_code = status.HTTP_200_OK
+    except Exception as exc:
+        print(f"[WARN] /health MongoDB ping failed: {exc}")
+        db_status = "disconnected"
+        overall_status = "unhealthy"
+        # 503 so load balancers / orchestrators (k8s liveness/readiness
+        # probes, uptime checks, etc.) correctly treat the instance as
+        # not ready rather than reading a 200 and assuming all is well.
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": overall_status,
+            "database": db_status,
+            "environment": settings.ENVIRONMENT,
+        },
+    )
 
 
 if __name__ == "__main__":
