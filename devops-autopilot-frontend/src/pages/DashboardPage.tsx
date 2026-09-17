@@ -7,6 +7,10 @@ import {
   Trash2,
   Container,
   Activity,
+  Boxes,
+  CheckCircle2,
+  Rocket,
+  HardDrive,
 } from "lucide-react";
 
 import { Navbar } from "../components/Navbar";
@@ -18,6 +22,8 @@ import { ExtractProjectModal } from "../components/ExtractProjectModal";
 import { AnalyzeProjectModal } from "../components/AnalyzeProjectModal";
 import { ProjectDetailsModal } from "../components/ProjectDetailsModal";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { EmptyState } from "../components/EmptyState";
+import { Stat } from "../components/Stat";
 import { apiClient } from "../api/client";
 import { Project } from "../types/api";
 import ThreeBackground from "../components/ThreeBackground";
@@ -182,22 +188,28 @@ export const DashboardPage: React.FC = () => {
 
           {/* Stats Bar */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12 animate-fade-in" style={{ animationDelay: "0.1s" }}>
-             <div className="bg-white/5 border border-white/5 rounded-2xl p-6 backdrop-blur-md">
-                <p className="text-gray-500 text-[10px] font-black uppercase tracking-widest mb-1">Total Assets</p>
-                <p className="text-2xl font-black">{projects.length}</p>
-             </div>
-             <div className="bg-white/5 border border-white/5 rounded-2xl p-6 backdrop-blur-md">
-                <p className="text-gray-500 text-[10px] font-black uppercase tracking-widest mb-1">Analyzed</p>
-                <p className="text-2xl font-black text-cyan-400">{projects.filter(p => p.status === 'analyzed').length}</p>
-             </div>
-             <div className="bg-white/5 border border-white/5 rounded-2xl p-6 backdrop-blur-md">
-                <p className="text-gray-500 text-[10px] font-black uppercase tracking-widest mb-1">Deployment Ready</p>
-                <p className="text-2xl font-black text-emerald-400">{projects.filter(p => p.status === 'completed').length}</p>
-             </div>
-             <div className="bg-white/5 border border-white/5 rounded-2xl p-6 backdrop-blur-md">
-                <p className="text-gray-500 text-[10px] font-black uppercase tracking-widest mb-1">Storage used</p>
-                <p className="text-2xl font-black">{formatBytes(projects.reduce((a,b) => a + b.file_size, 0))}</p>
-             </div>
+             <Stat
+               label="Total Assets"
+               value={projects.length}
+               icon={<Boxes size={16} />}
+             />
+             <Stat
+               label="Analyzed"
+               value={projects.filter(p => p.status === 'analyzed').length}
+               icon={<CheckCircle2 size={16} />}
+               color="#22d3ee"
+             />
+             <Stat
+               label="Deployment Ready"
+               value={projects.filter(p => p.status === 'completed').length}
+               icon={<Rocket size={16} />}
+               color="#10b981"
+             />
+             <Stat
+               label="Storage used"
+               value={formatBytes(projects.reduce((a,b) => a + b.file_size, 0))}
+               icon={<HardDrive size={16} />}
+             />
           </div>
 
           {/* Progress Bar */}
@@ -243,18 +255,19 @@ export const DashboardPage: React.FC = () => {
 
           {/* Projects Content */}
           {filteredProjects.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-center">
-              <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-6">
-                <Activity size={40} className="text-gray-600" />
-              </div>
-              <h3 className="text-2xl font-bold mb-2">No projects in this category</h3>
-              <p className="text-gray-500 mb-8 max-w-sm">
-                Ready to deploy? Upload your source code and let our AI handle the infrastructure.
-              </p>
-              <Button onClick={() => fileInputRef.current?.click()}>
-                <Upload size={16} /> Upload Now
-              </Button>
-            </div>
+            <EmptyState
+              icon={<Activity size={40} className="text-gray-600" />}
+              title="No projects in this category"
+              description="Ready to deploy? Upload your source code and let our AI handle the infrastructure."
+              action={{
+                label: (
+                  <>
+                    <Upload size={16} /> Upload Now
+                  </>
+                ),
+                onClick: () => fileInputRef.current?.click(),
+              }}
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6">
               {filteredProjects.map((project, idx) => (

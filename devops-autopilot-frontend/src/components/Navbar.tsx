@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import LogoMark from './LogoMark';
 import {
-  ChevronDown, Settings, LogOut, Activity, LayoutGrid
+  ChevronDown, LogOut, Activity, LayoutGrid
 } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
@@ -74,12 +74,6 @@ export const Navbar: React.FC = () => {
                         </div>
 
                         <div className="py-2">
-                          <button
-                            onClick={() => setShowUserMenu(false)}
-                            className="w-full flex items-center gap-3 px-5 py-3 text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white hover:bg-white/5 transition-all rounded-xl"
-                          >
-                            <Settings size={15} /> Settings
-                          </button>
                           <button
                             onClick={() => { setShowUserMenu(false); handleLogout(); }}
                             className="w-full flex items-center gap-3 px-5 py-3 text-xs font-black uppercase tracking-widest text-rose-500 hover:bg-rose-500/10 transition-all rounded-xl"
