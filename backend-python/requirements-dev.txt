@@ -1,0 +1,6 @@
+# Development / test-only dependencies.
+# Installs the full production requirement set first, then adds
+# what's needed to collect and run the test suite under tests/.
+-r requirements.txt
+
+pytest>=8.0,<9
