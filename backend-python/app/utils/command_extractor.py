@@ -264,11 +264,9 @@ def extract_nodejs_commands(project_path: str) -> Dict[str, Optional[str]]:
                 if ext.lower() in allowed_exts:
                     if os.path.isfile(fs_candidate):
                         return token_norm
-                    normalized_rel = token_norm.lstrip("./").lower()
-                    # Reject missing build-artifact targets (often stale/wrong before build).
-                    if normalized_rel.startswith(("dist/", "build/", ".next/", "out/", "lib/")):
-                        return None
-                    # Keep explicit non-build script targets even when file is not present yet.
+                    # Allow common build-output paths even before artifacts exist
+                    # (e.g. "node dist/main.js" in an unbuilt TypeScript project is
+                    # still the correct entry point once `npm run build` runs).
                     return token_norm
                 return None
 
@@ -808,12 +806,6 @@ def _parse_env_for_port(project_path: str, allow_backend_keys: bool = True) -> O
         [".env.example", ".env.sample"],
     ]
 
-    backend_only_keys = {"BACKEND_PORT", "SERVER_PORT", "API_PORT"}
-    frontend_only_keys = {
-        "FRONTEND_PORT", "CLIENT_PORT", "VITE_PORT",
-        "REACT_APP_PORT", "NEXT_PUBLIC_PORT", "VITE_DEV_PORT",
-    }
-
     if allow_backend_keys:
         key_priority = [
             "BACKEND_PORT", "SERVER_PORT", "API_PORT",
@@ -821,16 +813,15 @@ def _parse_env_for_port(project_path: str, allow_backend_keys: bool = True) -> O
             "FRONTEND_PORT", "CLIENT_PORT", "VITE_PORT",
             "REACT_APP_PORT", "NEXT_PUBLIC_PORT", "VITE_DEV_PORT",
         ]
-        valid_keys = set(key_priority)
     else:
-        # Frontend extraction should prefer frontend-specific keys.
-        # Generic PORT is treated as a fallback only when backend-specific
-        # keys are absent in the same env context.
+        # Frontend extraction only trusts frontend-specific keys. A generic
+        # PORT is ambiguous (commonly refers to the backend/server process),
+        # so it's never used to override a frontend framework default here.
         key_priority = [
             "FRONTEND_PORT", "CLIENT_PORT", "VITE_PORT",
             "REACT_APP_PORT", "NEXT_PUBLIC_PORT", "VITE_DEV_PORT",
         ]
-        valid_keys = set(key_priority) | {"PORT"} | backend_only_keys
+    valid_keys = set(key_priority)
 
     for env_files in env_file_groups:
         for env_file in env_files:
@@ -839,7 +830,6 @@ def _parse_env_for_port(project_path: str, allow_backend_keys: bool = True) -> O
                 continue
             try:
                 found_ports: Dict[str, int] = {}
-                saw_backend_specific = False
                 with open(env_path, 'r', encoding='utf-8', errors='ignore') as f:
                     for raw_line in f:
                         line = raw_line.strip()
@@ -850,8 +840,6 @@ def _parse_env_for_port(project_path: str, allow_backend_keys: bool = True) -> O
                         key = key.strip().upper()
                         if key not in valid_keys:
                             continue
-                        if key in backend_only_keys:
-                            saw_backend_specific = True
 
                         value = value.strip().strip('"').strip("'")
                         m = re.search(r"\b(\d{2,5})\b", value)
@@ -869,15 +857,6 @@ def _parse_env_for_port(project_path: str, allow_backend_keys: bool = True) -> O
                         port = found_ports[key]
                         print(f"PORT key detected: {key}={port} in {env_file}")
                         return port
-
-                if (
-                    not allow_backend_keys
-                    and "PORT" in found_ports
-                    and not saw_backend_specific
-                ):
-                    port = found_ports["PORT"]
-                    print(f"PORT key detected: PORT={port} in {env_file}")
-                    return port
             except Exception as e:
                 print(f"Error parsing {env_file}: {e}")
 

@@ -306,21 +306,7 @@ def _suppress_root_if_children_found(
             s for s in non_root
             if s.get("type") not in ("database", "other")
         ]
-        root_has_service_deps = False
-        root_pkg = os.path.join(project_path, "package.json")
-        if os.path.exists(root_pkg):
-            try:
-                with open(root_pkg, "r", encoding="utf-8", errors="ignore") as f:
-                    pkg = json.load(f) or {}
-                deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-                root_has_service_deps = bool(
-                    set(deps.keys()) & (BACKEND_DEPS | FRONTEND_DEPS | WORKER_DEPS)
-                )
-            except Exception:
-                pass
-
-        threshold = 2 if root_has_service_deps else 1
-        if len(real_non_root) >= threshold:
+        if len(real_non_root) >= 2:
             return non_root
 
     return services

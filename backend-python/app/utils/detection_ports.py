@@ -60,7 +60,7 @@ def _detect_fullstack_structure(project_path: str) -> Dict[str, Optional[str]]:
         "backend_path": None,
         "frontend_path": None,
     }
-    _BE_TOKENS = ("backend", "server", "api", "rest-api", "api-server", "backend-api")
+    _BE_TOKENS = ("backend", "server", "api", "rest-api", "api-server", "backend-api", "app")
     _FE_TOKENS = ("frontend", "client", "web", "ui", "webapp", "frontend-app", "client-app")
 
     def _matches(folder_name: str, token: str) -> bool:

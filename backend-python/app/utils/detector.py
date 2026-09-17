@@ -334,8 +334,17 @@ def find_project_root(extracted_path: str, max_depth: int = 5) -> str:
                         _, ext = os.path.splitext(name)
                         if ext.lower() in source_extensions:
                             return True
-                    # Accept conventional code folders for source signal.
-                    if os.path.isdir(abs_path) and name.lower() in source_hint_dirs:
+                    # Accept conventional code folders for source signal, but
+                    # not when that folder is itself a self-contained nested
+                    # project (has its own manifest) — that's a real child
+                    # service, not "source belonging to this level", and
+                    # should be reached by descending further instead of
+                    # anchoring the wrapper directory as the root.
+                    if (
+                        os.path.isdir(abs_path)
+                        and name.lower() in source_hint_dirs
+                        and not has_manifest(abs_path)
+                    ):
                         try:
                             base_depth = abs_path.count(os.sep)
                             for sub_root, sub_dirs, sub_files in os.walk(abs_path):
