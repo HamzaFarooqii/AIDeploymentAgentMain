@@ -851,15 +851,21 @@ class TestHeuristicFrameworkDetection:
         assert conf > 0.0
 
     def test_directory_style_file_marker_in_files_list_is_checked_as_dir(self, tmp_path):
-        """A files marker like 'pages/' should match an actual directory."""
-        _write(tmp_path / "pages" / "index.jsx", "export default function Page() { return null; }")
+        """A files marker like 'widgets_probe_dir/' should match an actual directory.
+
+        Uses a directory name not claimed by any real framework's own
+        indicators (unlike e.g. 'pages', which Next.js already lists as a
+        'dirs' indicator) so this test isolates the dir-style-marker-parsing
+        behavior instead of colliding with real framework detection.
+        """
+        _write(tmp_path / "widgets_probe_dir" / "index.jsx", "export default function Page() { return null; }")
 
         with patch.dict(
             "app.utils.detection_language.FRAMEWORK_INDICATORS",
             {
                 "DirStyleFramework": {
                     "markers": [],
-                    "files": ["pages/"],
+                    "files": ["widgets_probe_dir/"],
                     "dependencies": [],
                     "confidence_weight": 0.95,
                 }
@@ -1113,7 +1119,7 @@ class TestConsistencyReconciliation:
     @patch("app.utils.detector.heuristic_framework_detection")
     @patch("app.utils.detector.heuristic_language_detection")
     @patch("app.utils.detector.find_project_root")
-    def test_python_language_with_js_framework_resets_framework(
+    def test_python_language_with_js_framework_keeps_framework_and_adjusts_language(
         self,
         mock_find_root,
         mock_heur_lang,
@@ -1127,6 +1133,13 @@ class TestConsistencyReconciliation:
         mock_infer_services,
         tmp_path,
     ):
+        """When language/framework heuristics conflict, the framework signal
+        (a specific fingerprint like a dependency or JSX marker) is trusted
+        over the more generic language guess — language is coerced to match
+        the framework's language instead of discarding the framework.
+        This mirrors test_express_normalizes_language_to_javascript above,
+        which exercises the identical reconciliation path.
+        """
         mock_find_root.return_value = str(tmp_path)
         mock_heur_lang.return_value = ("Python", 0.9)
         mock_heur_fw.return_value = ("React", 0.9)
@@ -1144,7 +1157,9 @@ class TestConsistencyReconciliation:
         ]
 
         result = detect_framework(str(tmp_path), use_ml=False)
-        assert result["framework"] == "Unknown"
+        assert result["framework"] == "React"
+        assert result["language"] == "JavaScript"
+        assert result["detection_confidence"]["method"] == "hybrid (framework->language)"
 
     @patch("app.utils.detector.infer_services")
     @patch("app.utils.detector.detect_db_and_ports")
@@ -1255,7 +1270,17 @@ class TestDeployBlockedLogic:
         self, mock_py, mock_node, mock_fe_port,
         mock_port, mock_db, mock_ml, tmp_path
     ):
-        """Backend + mongoose (DB) + no .env → deploy_blocked = True."""
+        """Backend + mongoose (DB) + no .env → not blocked; .env auto-generated.
+
+        Deployment is never blocked on a missing .env (see commit
+        f7dbfa8 "feat: auto-generate .env instead of blocking deployment"):
+        the build pipeline auto-generates a .env template instead. The
+        flag/reason fields stay False/None; backend_env_missing is True and
+        deploy_warning explains the auto-generation, since a database was
+        detected. This matches the sibling tests in this class
+        (test_warning_when_no_db_no_env, test_not_blocked_with_env), which
+        already assert deploy_blocked is False.
+        """
         mock_ml.return_value = MagicMock()
         mock_node.return_value = {"start_command": "node server.js", "entry_point": "server.js"}
         mock_py.return_value = {}
@@ -1272,9 +1297,12 @@ class TestDeployBlockedLogic:
         # NO .env file
 
         result = detect_framework(str(tmp_path), use_ml=False)
-        assert result["deploy_blocked"] is True
-        assert result["deploy_warning"] is None
+        assert result["deploy_blocked"] is False
+        assert result["deploy_blocked_reason"] is None
         assert result["backend_env_missing"] is True
+        assert result["deploy_warning"] == (
+            "No .env file detected. One will be auto-generated before build."
+        )
 
     @patch("app.utils.detector.get_ml_analyzer")
     @patch("app.utils.detector.extract_database_info")

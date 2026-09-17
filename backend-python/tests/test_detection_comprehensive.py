@@ -1085,7 +1085,12 @@ class TestInferServicesOtherReclassification:
             db_result={"primary": "MongoDB", "all": ["MongoDB"], "details": {}},
         )
 
-        called_path, called_detected_db = mock_db.call_args.args
+        # extract_database_info is called first against the probe path (the
+        # "other" stub, since no real backend exists) and, because that path
+        # differs from the project root, a second time against the root to
+        # check for an authoritative root-level .env override. The primary
+        # probe (first call) is what this test verifies.
+        called_path, called_detected_db = mock_db.call_args_list[0].args
         assert os.path.normpath(called_path) == os.path.normpath(str(tmp_path / "misc"))
         assert called_detected_db == "MongoDB"
         assert any(s.get("type") == "database" for s in services)
