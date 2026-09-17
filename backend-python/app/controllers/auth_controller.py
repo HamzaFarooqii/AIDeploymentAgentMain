@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 from datetime import datetime
+from pymongo.errors import DuplicateKeyError
 from ..config.database import db
 from ..models.user import UserCreate, UserLogin, UserResponse, Token
 from ..utils.auth import get_password_hash, verify_password, create_access_token
@@ -47,8 +48,28 @@ async def register_user_handler(user_data: UserCreate):
             "updated_at": datetime.now()
         }
         
-        result = await users_collection.insert_one(user_doc)
-        
+        try:
+            result = await users_collection.insert_one(user_doc)
+        except DuplicateKeyError as e:
+            # Belt-and-suspenders: the find_one checks above already cover the
+            # common case, but they're not atomic with this insert, so two
+            # concurrent registrations can both pass the checks and race here.
+            # The unique indexes on users.username/email are what actually
+            # enforce uniqueness; translate the resulting DB error into a
+            # clean HTTP response instead of a generic 500.
+            key_pattern = getattr(e, "details", None) or {}
+            key_pattern = key_pattern.get("keyPattern", {})
+            if "username" in key_pattern:
+                detail = "Username already registered"
+            elif "email" in key_pattern:
+                detail = "Email already registered"
+            else:
+                detail = "Username or email already registered"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=detail
+            )
+
         print(f"✅ User registered: {user_data.username}")
         
         return {
