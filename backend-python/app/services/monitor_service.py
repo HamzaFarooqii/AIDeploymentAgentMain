@@ -5,7 +5,58 @@ import time
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from bson import ObjectId
+from pymongo import MongoClient
+
+from app.config.settings import settings
+from app.utils.detector import find_project_root
 from app.utils.k8s_deployer import diagnose_pod_health
+
+
+def _resolve_project_infra_dir(project_id: str) -> Optional[str]:
+    """
+    Resolve the Terraform working directory for a project the same way
+    AWSDeploymentService (app/services/aws_service.py) and
+    _resolve_project_root() (app/controllers/aws_deploy_controller.py) do:
+
+        {project_root}/infra
+
+    where project_root is derived from the project's `extracted_path`
+    (stored on the Mongo project document) via find_project_root() —
+    NOT a top-level "terraform/<project_id>" folder relative to the
+    process's current working directory.
+
+    Uses a short-lived synchronous pymongo client (pymongo already ships
+    as motor's dependency) since this service's methods are synchronous
+    and only receive a project_id, not the project document.
+    """
+    if not project_id or not ObjectId.is_valid(project_id):
+        return None
+
+    try:
+        client = MongoClient(settings.MONGODB_URL, serverSelectionTimeoutMS=3000)
+        try:
+            project = client[settings.DATABASE_NAME]["projects"].find_one(
+                {"_id": ObjectId(project_id)}
+            )
+        finally:
+            client.close()
+    except Exception:
+        return None
+
+    if not project:
+        return None
+
+    extracted_path = project.get("extracted_path")
+    if not extracted_path:
+        return None
+
+    real_path = os.path.abspath(extracted_path)
+    if not os.path.exists(real_path):
+        return None
+
+    project_root = find_project_root(real_path)
+    return os.path.join(project_root, "infra")
 
 
 class MonitorService:
@@ -20,8 +71,8 @@ class MonitorService:
     @staticmethod
     def get_aws_health(project_id: str) -> Dict[str, Any]:
         """Check AWS Terraform state health."""
-        tf_dir = os.path.join("terraform", project_id)
-        if not os.path.exists(os.path.join(tf_dir, "terraform.tfstate")):
+        tf_dir = _resolve_project_infra_dir(project_id)
+        if not tf_dir or not os.path.exists(os.path.join(tf_dir, "terraform.tfstate")):
             return {"status": "not_deployed", "healthy": False}
 
         try:
