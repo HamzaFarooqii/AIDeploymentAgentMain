@@ -1,6 +1,6 @@
 # DevOps AutoPilot Run Commands
 
-Run commands from PowerShell unless noted otherwise.
+Run commands from PowerShell unless noted otherwise. All commands below assume your terminal's current directory is the root of your local clone of this repository (the folder that directly contains `backend-python/` and `devops-autopilot-frontend/`) — `cd` there once, then run the commands as shown.
 
 ## 1. Start MongoDB
 
@@ -32,14 +32,14 @@ DATABASE_NAME=devops_autopilot
 ## 2. Run Backend
 
 ```powershell
-cd C:\Users\abdul\Downloads\devops-autopilot\devops-autopilot\backend-python
+cd backend-python
 .\venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 Run with auto-reload only during development:
 
 ```powershell
-cd C:\Users\abdul\Downloads\devops-autopilot\devops-autopilot\backend-python
+cd backend-python
 .\venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
@@ -56,14 +56,14 @@ Health: http://localhost:8000/health
 Install dependencies once:
 
 ```powershell
-cd C:\Users\abdul\Downloads\devops-autopilot\devops-autopilot\devops-autopilot-frontend
+cd devops-autopilot-frontend
 npm.cmd install
 ```
 
 Start the Vite dev server:
 
 ```powershell
-cd C:\Users\abdul\Downloads\devops-autopilot\devops-autopilot\devops-autopilot-frontend
+cd devops-autopilot-frontend
 npm.cmd run dev
 ```
 
@@ -86,7 +86,7 @@ GEMINI_MODEL_NAME=gemini-2.5-flash
 Confirm provider:
 
 ```powershell
-cd C:\Users\abdul\Downloads\devops-autopilot\devops-autopilot
+# from the repository root
 backend-python\venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'backend-python'); from app.config.settings import settings; print(settings.DOCKER_LLM_PROVIDER)"
 ```
 
@@ -110,14 +110,14 @@ ollama pull llama3.1:7b
 Backend import check:
 
 ```powershell
-cd C:\Users\abdul\Downloads\devops-autopilot\devops-autopilot
+# from the repository root
 backend-python\venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'backend-python'); from app.main import app; print('backend import ok')"
 ```
 
 Focused backend tests:
 
 ```powershell
-cd C:\Users\abdul\Downloads\devops-autopilot\devops-autopilot
+# from the repository root
 backend-python\venv\Scripts\python.exe -m pytest backend-python/tests/test_docker_agent.py -q
 backend-python\venv\Scripts\python.exe -m pytest backend-python/tests/test_docker_pipeline.py -k RuntimeHintAugmentation -q
 ```
@@ -125,7 +125,7 @@ backend-python\venv\Scripts\python.exe -m pytest backend-python/tests/test_docke
 Frontend build check:
 
 ```powershell
-cd C:\Users\abdul\Downloads\devops-autopilot\devops-autopilot\devops-autopilot-frontend
+cd devops-autopilot-frontend
 npm.cmd run build
 ```
 

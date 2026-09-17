@@ -144,7 +144,7 @@ AWS_DEFAULT_REGION=us-east-1
 TERRAFORM_PATH=terraform
 AWS_EC2_INSTANCE_TYPE=t3.micro
 AWS_EC2_KEY_NAME=aws-deployment-devops
-AWS_SSH_PRIVATE_KEY_PATH=C:/Users/abdul/Downloads/aws-deployment-devops.pem
+AWS_SSH_PRIVATE_KEY_PATH=/path/to/your-key.pem
 ```
 
 > Note: `.env` values override `settings.py` defaults at runtime.
@@ -164,7 +164,7 @@ AWS_SSH_PRIVATE_KEY_PATH=C:/Users/abdul/Downloads/aws-deployment-devops.pem
 | `GEMINI_FALLBACK_MODEL_NAME` | `None`                    | Optional fallback used only for Gemini 429/503 |
 | `AWS_EC2_INSTANCE_TYPE` | `t3.micro`                       | EC2 instance type enforced after Terraform generation |
 | `AWS_EC2_KEY_NAME` | `aws-deployment-devops`              | EC2 key pair name enforced for SSH |
-| `AWS_SSH_PRIVATE_KEY_PATH` | `C:/Users/abdul/Downloads/aws-deployment-devops.pem` | Local PEM path used in `ssh_command` output |
+| `AWS_SSH_PRIVATE_KEY_PATH` | `""` (empty — must be set explicitly; shown here as `/path/to/your-key.pem`) | Local PEM path used in `ssh_command` output |
 
 ---
 
@@ -1272,7 +1272,7 @@ This endpoint is a readiness check. `generate_terraform_handler()` performs its 
 | `desired_count` | `1` | Passed to the prompt for compatibility; EC2/docker-compose apply does not pass it as a Terraform variable |
 | `extra_env` | `None` | Merged into every detected service env dict before prompting |
 | `key_name` | `aws-deployment-devops` | EC2 key pair name; generated Terraform must include `key_name = var.key_name` |
-| `ssh_private_key_path` | `C:/Users/abdul/Downloads/aws-deployment-devops.pem` | Local PEM path used by `ssh_command` output |
+| `ssh_private_key_path` | `/path/to/your-key.pem` (placeholder — must be supplied explicitly) | Local PEM path used by `ssh_command` output |
 | `allowed_ssh_cidr` | `0.0.0.0/0` | Security group SSH CIDR default |
 | `app_port` | auto-detected | Primary app port used for `var.app_port` and app URL output |
 | `root_volume_size` | `20` | Root EBS volume size in GB |
@@ -1319,7 +1319,7 @@ Post-processing in `aws_deploy_controller.py`:
 5. `_expected_aws_app_images()` extracts the exact non-database images EC2 will pull.
 6. `_validate_docker_hub_manifests_exist()` blocks Terraform generation when Docker Hub does not have one of those app image manifests.
 7. `_enforce_ec2_instance_type()` rewrites the first `instance_type = "..."` to `settings.AWS_EC2_INSTANCE_TYPE`.
-8. `_enforce_ssh_key_settings()` sets `key_name` to `aws-deployment-devops`, adds/updates `ssh_private_key_path`, and rewrites `ssh_command` so it uses `C:/Users/abdul/Downloads/aws-deployment-devops.pem` instead of `<your-key.pem>`.
+8. `_enforce_ssh_key_settings()` sets `key_name` to `aws-deployment-devops`, adds/updates `ssh_private_key_path`, and rewrites `ssh_command` so it uses the configured `AWS_SSH_PRIVATE_KEY_PATH` (e.g. `/path/to/your-key.pem`) instead of `<your-key.pem>`.
 9. `_ensure_compose_host_ports_allowed()` extracts quoted compose port mappings from the generated HCL, rejects duplicate host ports, and inserts missing security group ingress blocks for host ports.
 10. `_dedupe_ingress_blocks_in_security_groups()` removes duplicate AWS ingress permissions after resolving simple variable defaults such as `var.app_port`.
 11. `_run_terraform_validations()` requires `key_name`, SSH ingress for 22, an egress block, `user_data` containing Docker commands, output blocks for `app_url` and `ssh_command`, a non-placeholder SSH key path, and a root block device of at least 20 GB when a literal `volume_size` is present.
@@ -1616,7 +1616,7 @@ devops-autopilot/
 | `backend-python/tests/test_port_detection.py`          | Port detection      | Multi-source port resolution |
 | `backend-python/tests/test_command_extractor.py`       | Command extraction  | Node.js/Python entry points  |
 
-**Total: 362 tests** (all passing after modular refactoring)
+**Total: 426 tests** (all passing after modular refactoring; earlier counts such as the 362-test figure, and the thesis chapter's separate 74-unit-test figure, reflect earlier project stages)
 
 **Run tests:**
 
