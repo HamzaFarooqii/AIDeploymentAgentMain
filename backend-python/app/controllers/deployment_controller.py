@@ -8,6 +8,7 @@ from ..utils.docker_builder import build_docker_image
 from ..utils.docker_pusher import push_docker_image
 from ..utils.k8s_deployer import deploy_to_kubernetes, get_deployment_status, cleanup_deployment
 from ..utils.k8s_manifest_generator import generate_k8s_manifests
+from ..utils.image_naming import build_project_image_repo
 
 
 async def deploy_project_handler(project_id: str, current_user: dict):
@@ -60,7 +61,11 @@ async def deploy_project_handler(project_id: str, current_user: dict):
         
         # Step 1: Build Docker image
         print(f"🐳 Building Docker image...")
-        image_name = f"hamzafarooqi/devops-autopilot-{project_name}"
+        image_name = build_project_image_repo(
+            project.get("project_name", "app"),
+            settings.DOCKER_HUB_USERNAME,
+            settings.APP_REGISTRY_PREFIX,
+        )
         image_tag = f"{image_name}:latest"
         
         build_result = build_docker_image(
