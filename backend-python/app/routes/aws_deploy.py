@@ -39,7 +39,7 @@ class AWSConfig(BaseModel):
     extra_env: Optional[Dict[str, str]] = None
     # EC2 access / sizing
     key_name: str = "aws-deployment-devops" # EC2 key pair name for SSH
-    ssh_private_key_path: str = "C:/Users/abdul/Downloads/aws-deployment-devops.pem"
+    ssh_private_key_path: str = ""  # Local path to the EC2 SSH private key (.pem); falls back to settings.AWS_SSH_PRIVATE_KEY_PATH when unset
     allowed_ssh_cidr: str = "0.0.0.0/0"    # CIDR allowed to SSH; restrict to your IP in production
     app_port: Optional[int] = None          # Primary app port; auto-detected from services when None
     root_volume_size: int = 20              # Root EBS volume GB (min 20 for Docker workloads)

@@ -53,7 +53,7 @@ variable "key_name" {
 }
 variable "ssh_private_key_path" {
   description = "Local path to the EC2 private key PEM file"
-  default     = "C:/Users/abdul/Downloads/aws-deployment-devops.pem"
+  default     = "/path/to/your-key.pem"
 }
 variable "allowed_ssh_cidr" {
   description = "CIDR block allowed to SSH"
@@ -162,7 +162,7 @@ Output all of these, no exceptions:
 ## DEBUG COMMANDS (include as comments at the bottom of main.tf)
 # After deployment, use these commands to debug:
 # terraform output                                          - Show all outputs
-# ssh -i C:/Users/abdul/Downloads/aws-deployment-devops.pem ec2-user@<public_ip> - SSH into instance
+# ssh -i /path/to/your-key.pem ec2-user@<public_ip> - SSH into instance
 # curl http://<public_ip>:<app_port>                       - Test app endpoint
 # sudo docker ps                                           - List running containers
 # sudo docker logs <container_name>                        - View container logs

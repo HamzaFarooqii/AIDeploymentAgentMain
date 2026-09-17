@@ -58,7 +58,12 @@ class Settings(BaseSettings):
     TERRAFORM_PATH: str = "terraform"  # Path to terraform CLI binary
     AWS_EC2_INSTANCE_TYPE: str = "t3.micro"
     AWS_EC2_KEY_NAME: str = "aws-deployment-devops"
-    AWS_SSH_PRIVATE_KEY_PATH: str = "C:/Users/abdul/Downloads/aws-deployment-devops.pem"
+    # Local path to the EC2 SSH private key (.pem) file. Must be set via
+    # AWS_SSH_PRIVATE_KEY_PATH in the environment/.env — there is no safe
+    # machine-specific default. Left empty ("") so unset is a genuinely
+    # falsy value that callers can detect (`if not settings.AWS_SSH_PRIVATE_KEY_PATH`)
+    # rather than silently deploying with a path that doesn't exist.
+    AWS_SSH_PRIVATE_KEY_PATH: str = ""
     
     class Config:
         env_file = ".env"

@@ -94,11 +94,18 @@ resource "aws_instance" "app_server" {
 output "ssh_command" { value = "ssh -i <your-key.pem> ec2-user@${aws_instance.app_server.public_ip}" }
 '''
 
-        result = _enforce_ssh_key_settings(terraform_code)
+        # AWS_SSH_PRIVATE_KEY_PATH has no machine-specific default (it must be
+        # configured per-deployment via .env), so patch a deterministic value
+        # for this test rather than depending on the empty default.
+        with patch(
+            "app.controllers.aws_deploy_controller.settings.AWS_SSH_PRIVATE_KEY_PATH",
+            "/test/keys/aws-deployment-devops.pem",
+        ):
+            result = _enforce_ssh_key_settings(terraform_code)
 
         self.assertIn('default     = "aws-deployment-devops"', result)
         self.assertIn('variable "ssh_private_key_path"', result)
-        self.assertIn('C:/Users/abdul/Downloads/aws-deployment-devops.pem', result)
+        self.assertIn('/test/keys/aws-deployment-devops.pem', result)
         self.assertIn("ssh -i ${var.ssh_private_key_path}", result)
         self.assertNotIn("<your-key.pem>", result)
 
