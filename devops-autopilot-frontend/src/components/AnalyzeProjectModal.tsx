@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Card } from "./Card";
 import { Button } from "./Button";
 import { Badge } from "./Badge";
@@ -32,9 +32,9 @@ export const AnalyzeProjectModal: React.FC<AnalyzeProjectModalProps> = ({
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [analysisResults, setAnalysisResults] =
     useState<ProjectMetadata | null>(null);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(
-    null
-  );
+  const [pollingInterval, setPollingInterval] = useState<ReturnType<
+    typeof setInterval
+  > | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -45,15 +45,18 @@ export const AnalyzeProjectModal: React.FC<AnalyzeProjectModalProps> = ({
     scrollToBottom();
   }, [logs]);
 
-  const addLog = (
-    message: string,
-    type: "info" | "success" | "warning" | "error" = "info"
-  ) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setLogs((prev) => [...prev, { message, timestamp, type }]);
-  };
+  const addLog = useCallback(
+    (
+      message: string,
+      type: "info" | "success" | "warning" | "error" = "info"
+    ) => {
+      const timestamp = new Date().toLocaleTimeString();
+      setLogs((prev) => [...prev, { message, timestamp, type }]);
+    },
+    []
+  );
 
-  const pollAnalysisStatus = async () => {
+  const pollAnalysisStatus = useCallback(async () => {
     try {
       const response = await apiClient.getAnalysisResults(project._id);
       if (response.success) {
@@ -68,10 +71,10 @@ export const AnalyzeProjectModal: React.FC<AnalyzeProjectModalProps> = ({
           setTimeout(onSuccess, 2000);
         }
       }
-    } catch (err) {
+    } catch {
       // Continue polling
     }
-  };
+  }, [project._id, pollingInterval, onSuccess, addLog]);
 
   useEffect(() => {
     if (loading && !pollingInterval) {
@@ -79,7 +82,7 @@ export const AnalyzeProjectModal: React.FC<AnalyzeProjectModalProps> = ({
       setPollingInterval(interval);
       return () => clearInterval(interval);
     }
-  }, [loading, pollingInterval]);
+  }, [loading, pollingInterval, pollAnalysisStatus]);
 
   const handleAnalyze = async () => {
     setError(null);
@@ -125,12 +128,12 @@ export const AnalyzeProjectModal: React.FC<AnalyzeProjectModalProps> = ({
                 onSuccess();
               }
             }
-          } catch (err) {
+          } catch {
             // Continue polling
           }
         }, 2000);
 
-        setPollingInterval(pollInterval as any);
+        setPollingInterval(pollInterval);
       } else {
         const message =
           response.message ||
@@ -408,7 +411,7 @@ export const AnalyzeProjectModal: React.FC<AnalyzeProjectModalProps> = ({
               {(() => {
                 const mlConfidence =
                   analysisResults.ml_confidence ||
-                  (analysisResults as any).detection_confidence;
+                  analysisResults.detection_confidence;
 
                 if (!mlConfidence) return null;
 

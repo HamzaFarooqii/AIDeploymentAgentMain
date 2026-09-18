@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import ThreeBackground from '../components/ThreeBackground';
+import { useAuth } from '../context/useAuth';
 import LogoMark from '../components/LogoMark';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -9,6 +8,8 @@ import { Alert } from '../components/Alert';
 import {
   Mail, Lock, ArrowRight, ShieldCheck, User
 } from 'lucide-react';
+
+const ThreeBackground = lazy(() => import('../components/ThreeBackground'));
 
 export const RegisterPage: React.FC = () => {
   const navigate = useNavigate();
@@ -61,7 +62,9 @@ export const RegisterPage: React.FC = () => {
 
   return (
     <div className="min-h-screen relative overflow-hidden flex items-center justify-center px-4 py-10 bg-[#050810]">
-      <ThreeBackground />
+      <Suspense fallback={null}>
+        <ThreeBackground />
+      </Suspense>
       <div className="absolute inset-0 grid-bg opacity-30 pointer-events-none" style={{ zIndex: 1 }} />
 
       <div className="w-full max-w-lg relative z-10 animate-fade-in">

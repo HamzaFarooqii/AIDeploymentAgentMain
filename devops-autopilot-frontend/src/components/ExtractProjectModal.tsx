@@ -37,7 +37,9 @@ export const ExtractProjectModal: React.FC<ExtractProjectModalProps> = ({
   const [success, setSuccess] = useState(false);
   const [extractedFiles, setExtractedFiles] = useState<ExtractedFile[]>([]);
   const [showFiles, setShowFiles] = useState(false);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [pollingInterval, setPollingInterval] = useState<ReturnType<
+    typeof setInterval
+  > | null>(null);
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
@@ -60,6 +62,12 @@ export const ExtractProjectModal: React.FC<ExtractProjectModalProps> = ({
       setPollingInterval(interval);
       return () => clearInterval(interval);
     }
+    // Intentionally only re-runs when `loading` toggles. This effect is gated by
+    // `pollingInterval` itself (`!pollingInterval`), so adding `pollingInterval`
+    // as a dependency would re-fire the effect the instant it sets the interval,
+    // clearing it before it ever ticks. `onSuccess`/`project._id` are read from
+    // the latest render via closure and don't need to retrigger this setup.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
   const handleExtract = async () => {
@@ -84,7 +92,7 @@ export const ExtractProjectModal: React.FC<ExtractProjectModalProps> = ({
             }
           } catch { /* keep polling */ }
         }, 2000);
-        setPollingInterval(pollInterval as any);
+        setPollingInterval(pollInterval);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Extraction failed');

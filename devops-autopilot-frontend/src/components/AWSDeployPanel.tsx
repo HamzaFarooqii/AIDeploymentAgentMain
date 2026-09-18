@@ -137,8 +137,8 @@ const AWSDeployPanel: React.FC<AWSDeployPanelProps> = ({
     try {
       const result = await apiClient.getAWSStatus(projectId);
       setStatus(result);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load AWS status');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load AWS status');
     }
   }, [projectId]);
 
@@ -203,8 +203,8 @@ const AWSDeployPanel: React.FC<AWSDeployPanelProps> = ({
       onLog?.(`Terraform layer generated at ${result.terraform_path}`);
       onTerraformGenerated?.();
       onStatusChange?.();
-    } catch (err: any) {
-      const msg = err?.message || 'Failed to generate Terraform';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate Terraform';
       setError(msg);
       onLog?.(`Terraform generation failed: ${msg}`);
     } finally {

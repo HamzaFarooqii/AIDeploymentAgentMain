@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -24,47 +24,10 @@ import {
 } from "lucide-react";
 import { apiClient, streamMonitorLogs } from "../api/client";
 import { Button } from "./Button";
+import { MonitorStatus } from "../types/api";
 
 interface MonitoringDashboardProps {
   projectId: string;
-}
-
-interface PodInfo {
-  name: string;
-  namespace: string;
-  status: string;
-  ready: boolean;
-  restart_count: number;
-  pod_ip?: string;
-  labels?: Record<string, string>;
-  created_at?: string;
-}
-
-interface K8sEvent {
-  type: string;
-  reason: string;
-  message: string;
-  timestamp: string;
-  count: number;
-}
-
-interface MonitorStatus {
-  success: boolean;
-  project_name: string;
-  deployment_name: string;
-  overall_healthy: boolean;
-  kubernetes: {
-    healthy: boolean;
-    state: string;
-    reason: string;
-    restart_count: number;
-    pod_name?: string;
-  };
-  aws: { status: string; healthy: boolean; details: string };
-  pods: PodInfo[];
-  recent_events: K8sEvent[];
-  deployment_status: string;
-  deployment?: Record<string, any>;
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -138,7 +101,7 @@ export const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
 
   // ── fetch status ──────────────────────────────────────────────────────────
 
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       const data = await apiClient.getMonitorStatus(projectId);
       if (data.success) {
@@ -147,25 +110,25 @@ export const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
       } else {
         setError(data.message || "Failed to fetch status");
       }
-    } catch (err: any) {
-      setError(err.message || "Could not reach backend");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reach backend");
     } finally {
       setLoading(false);
       setLastRefresh(new Date());
     }
-  };
+  }, [projectId]);
 
   useEffect(() => {
     fetchStatus();
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
-  }, [projectId]);
+  }, [fetchStatus]);
 
   useEffect(() => {
     if (logsEndRef.current && isStreaming) {
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [logs]);
+  }, [logs, isStreaming]);
 
   useEffect(
     () => () => {
@@ -181,9 +144,9 @@ export const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
     try {
       const res = await apiClient.healProject(projectId);
       if (res.success) await fetchStatus();
-      else setError(res.message);
-    } catch (err: any) {
-      setError(err.message);
+      else setError(res.message || "Heal request failed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Heal request failed");
     } finally {
       setHealing(false);
     }

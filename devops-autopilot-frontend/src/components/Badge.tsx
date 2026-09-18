@@ -1,8 +1,10 @@
 import React from 'react';
 
+export type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'default' | 'purple';
+
 interface BadgeProps {
   children: React.ReactNode;
-  variant?: 'success' | 'warning' | 'error' | 'info' | 'default' | 'purple';
+  variant?: BadgeVariant;
   size?: 'sm' | 'md';
 }
 

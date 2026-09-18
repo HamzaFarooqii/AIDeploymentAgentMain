@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Container,
@@ -26,9 +26,10 @@ import {
   DockerContextResponse,
   FileNode,
 } from "../types/api";
-import ThreeBackground from "../components/ThreeBackground";
 import { MonitoringDashboard } from "../components/MonitoringDashboard";
 import AWSDeployPanel from "../components/AWSDeployPanel";
+
+const ThreeBackground = lazy(() => import("../components/ThreeBackground"));
 
 type DeployMode = "docker" | "aws" | "monitor";
 
@@ -69,7 +70,7 @@ export const DeployPage: React.FC = () => {
   const [deployMode, setDeployMode] = useState<DeployMode>("docker");
 
   const rawApiBase =
-    (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000/api";
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
   const apiBase = rawApiBase.endsWith("/api")
     ? rawApiBase.replace(/\/+$/, "")
     : `${rawApiBase.replace(/\/+$/, "")}/api`;
@@ -542,7 +543,9 @@ export const DeployPage: React.FC = () => {
 
   return (
     <div className="min-h-screen relative overflow-hidden flex flex-col bg-[#050810]">
-      <ThreeBackground />
+      <Suspense fallback={null}>
+        <ThreeBackground />
+      </Suspense>
       <div className="absolute inset-0 grid-bg opacity-30 pointer-events-none" style={{ zIndex: 1 }} />
 
       <div className="relative z-10 flex flex-col h-full bg-[#050810]/40">
@@ -770,12 +773,12 @@ export const DeployPage: React.FC = () => {
                     )}
 
                     <div className="flex flex-col gap-2">
-                      {["build", "run", "push"].map(action => (
+                      {(["build", "run", "push"] as const).map(action => (
                         <Button
                           key={action}
                           variant="secondary"
                           className="w-full h-11 text-xs font-black uppercase tracking-widest"
-                          onClick={() => startStream(action as any)}
+                          onClick={() => startStream(action)}
                           disabled={context.metadata.deploy_blocked}
                         >
                           {action}_IMAGE

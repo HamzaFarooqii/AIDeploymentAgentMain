@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Card } from "./Card";
 import { Button } from "./Button";
-import { Badge } from "./Badge";
+import { Badge, BadgeVariant } from "./Badge";
 import { apiClient } from "../api/client";
 import { Project } from "../types/api";
 import AWSDeployPanel from "./AWSDeployPanel";
@@ -57,7 +57,7 @@ export const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
     }
   };
 
-  const statusVariant: any = 
+  const statusVariant: BadgeVariant =
     project.status === "uploaded" ? "info" :
     (project.status === "extracting" || project.status === "analyzing") ? "warning" :
     (project.status === "analyzed" || project.status === "completed") ? "success" :

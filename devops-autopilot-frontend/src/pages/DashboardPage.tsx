@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Upload,
@@ -16,7 +16,7 @@ import {
 import { Navbar } from "../components/Navbar";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
-import { Badge } from "../components/Badge";
+import { Badge, BadgeVariant } from "../components/Badge";
 import { Alert } from "../components/Alert";
 import { ExtractProjectModal } from "../components/ExtractProjectModal";
 import { AnalyzeProjectModal } from "../components/AnalyzeProjectModal";
@@ -26,7 +26,8 @@ import { EmptyState } from "../components/EmptyState";
 import { Stat } from "../components/Stat";
 import { apiClient } from "../api/client";
 import { Project } from "../types/api";
-import ThreeBackground from "../components/ThreeBackground";
+
+const ThreeBackground = lazy(() => import("../components/ThreeBackground"));
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
@@ -111,7 +112,7 @@ export const DashboardPage: React.FC = () => {
     loadProjects();
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string): BadgeVariant => {
     switch (status) {
       case "uploaded": return "info";
       case "extracting":
@@ -150,7 +151,9 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="min-h-screen text-white relative flex flex-col">
-      <ThreeBackground />
+      <Suspense fallback={null}>
+        <ThreeBackground />
+      </Suspense>
       <Navbar />
 
       <div className="flex-1 relative z-10 overflow-y-auto">
@@ -230,14 +233,16 @@ export const DashboardPage: React.FC = () => {
 
           {/* Filter Navigation */}
           <div className="flex justify-center mb-10 border-b border-white/5">
-            {[
-              { id: "all", label: "All Projects" },
-              { id: "analyzed", label: "Analyzed" },
-              { id: "uploaded", label: "Uploaded & Processing" },
-            ].map((tab) => (
+            {(
+              [
+                { id: "all", label: "All Projects" },
+                { id: "analyzed", label: "Analyzed" },
+                { id: "uploaded", label: "Uploaded & Processing" },
+              ] as const
+            ).map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setSelectedFilter(tab.id as any)}
+                onClick={() => setSelectedFilter(tab.id)}
                 className={`px-8 py-5 text-sm font-black transition-all relative uppercase tracking-widest ${
                   selectedFilter === tab.id ? "text-white" : "text-gray-500 hover:text-gray-300"
                 }`}
@@ -283,7 +288,7 @@ export const DashboardPage: React.FC = () => {
                        </h3>
                        <p className="text-xs text-gray-500 font-mono truncate">{project.file_name}</p>
                     </div>
-                    <Badge variant={getStatusColor(project.status) as any}>
+                    <Badge variant={getStatusColor(project.status)}>
                       {project.status.toUpperCase()}
                     </Badge>
                   </div>

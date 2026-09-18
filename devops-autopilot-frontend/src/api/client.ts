@@ -10,10 +10,12 @@ import {
   AnalysisResponse,
   DockerChatResponse,
   DockerContextResponse,
+  MonitorStatus,
+  HealResponse,
 } from "../types/api";
 
 const rawApiBase =
-  (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000/api";
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
 const API_BASE_URL = rawApiBase.endsWith("/api")
   ? rawApiBase.replace(/\/+$/, "")
   : `${rawApiBase.replace(/\/+$/, "")}/api`;
@@ -440,7 +442,7 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async getMonitorStatus(projectId: string): Promise<any> {
+  async getMonitorStatus(projectId: string): Promise<MonitorStatus> {
     const response = await fetch(`${API_BASE_URL}/monitor/${projectId}/status`, {
       method: "GET",
       headers: this.getHeaders(),
@@ -448,7 +450,7 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async healProject(projectId: string): Promise<any> {
+  async healProject(projectId: string): Promise<HealResponse> {
     const response = await fetch(`${API_BASE_URL}/monitor/${projectId}/heal`, {
       method: "POST",
       headers: this.getHeaders(),
@@ -465,7 +467,7 @@ export function streamMonitorLogs(
   onError: (error: Error) => void
 ): EventSource {
   const rawApiBase =
-    (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000/api";
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
   const apiBase = rawApiBase.endsWith("/api")
     ? rawApiBase.replace(/\/+$/, "")
     : `${rawApiBase.replace(/\/+$/, "")}/api`;
@@ -487,7 +489,7 @@ export function streamMonitorLogs(
       } else {
         onLog(data.message);
       }
-    } catch (err) {
+    } catch {
       onLog(event.data); // fallback to raw string
     }
   };
@@ -520,7 +522,7 @@ export function streamDockerChat(
   onError: (error: Error) => void
 ): EventSource {
   const rawApiBase =
-    (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000/api";
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
   const apiBase = rawApiBase.endsWith("/api")
     ? rawApiBase.replace(/\/+$/, "")
     : `${rawApiBase.replace(/\/+$/, "")}/api`;
@@ -588,11 +590,11 @@ export function streamAWSTerraform(
   projectId: string,
   operation: 'apply' | 'destroy' | 'scale-zero' | 'scale-up',
   onEvent: (event: { type: string; message: string; stage?: string }) => void,
-  onComplete: (outputs?: Record<string, any>) => void,
+  onComplete: (outputs?: Record<string, unknown>) => void,
   onError: (error: Error) => void
 ): EventSource {
   const rawApiBase =
-    (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000/api";
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
   const apiBase = rawApiBase.endsWith("/api")
     ? rawApiBase.replace(/\/+$/, "")
     : `${rawApiBase.replace(/\/+$/, "")}/api`;

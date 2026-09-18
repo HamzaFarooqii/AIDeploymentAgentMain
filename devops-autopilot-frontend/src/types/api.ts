@@ -277,3 +277,48 @@ export interface ApiError {
   error?: string;
 }
 
+// ============ MONITORING TYPES ============
+export interface PodInfo {
+  name: string;
+  namespace: string;
+  status: string;
+  ready: boolean;
+  restart_count: number;
+  pod_ip?: string;
+  labels?: Record<string, string>;
+  created_at?: string;
+}
+
+export interface K8sEvent {
+  type: string;
+  reason: string;
+  message: string;
+  timestamp: string;
+  count: number;
+}
+
+export interface MonitorStatus {
+  success: boolean;
+  message?: string;
+  project_name: string;
+  deployment_name: string;
+  overall_healthy: boolean;
+  kubernetes: {
+    healthy: boolean;
+    state: string;
+    reason: string;
+    restart_count: number;
+    pod_name?: string;
+  };
+  aws: { status: string; healthy: boolean; details: string };
+  pods: PodInfo[];
+  recent_events: K8sEvent[];
+  deployment_status: string;
+  deployment?: Record<string, unknown>;
+}
+
+export interface HealResponse {
+  success: boolean;
+  message?: string;
+}
+
