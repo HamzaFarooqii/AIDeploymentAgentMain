@@ -20,7 +20,7 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { Badge } from "../components/Badge";
 import { AIChatSidebar } from "../components/AIChatSidebar";
-import { apiClient, streamAWSTerraform } from "../api/client";
+import { apiClient } from "../api/client";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import {
   DockerContextResponse,
@@ -28,6 +28,7 @@ import {
 } from "../types/api";
 import ThreeBackground from "../components/ThreeBackground";
 import { MonitoringDashboard } from "../components/MonitoringDashboard";
+import AWSDeployPanel from "../components/AWSDeployPanel";
 
 type DeployMode = "docker" | "aws" | "monitor";
 
@@ -66,17 +67,6 @@ export const DeployPage: React.FC = () => {
 
   // Deploy mode toggle: docker or aws
   const [deployMode, setDeployMode] = useState<DeployMode>("docker");
-  const [awsConfig, setAwsConfig] = useState({
-    aws_region: "us-east-1",
-    docker_repo_prefix: "",
-    db_engine: "none",
-    mongo_db_url: "",
-    desired_count: 1,
-  });
-  const [awsStatus, setAwsStatus] = useState<string>("not_deployed");
-  const [terraformExists, setTerraformExists] = useState<boolean>(false);
-  const [terraformLogs, setTerraformLogs] = useState<{ type: string; message: string; stage?: string }[]>([]);
-  const [isDeploying, setIsDeploying] = useState(false);
 
   const rawApiBase =
     (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000/api";
@@ -100,20 +90,6 @@ export const DeployPage: React.FC = () => {
           },
         ]);
         setError(null);
-
-        // Also fetch AWS prerequisites to get Docker Hub username
-        try {
-          const awsPrereqs = await apiClient.checkAWSPrerequisites(projectId);
-          if (awsPrereqs.docker_hub_username) {
-            setAwsConfig(prev => ({ ...prev, docker_repo_prefix: awsPrereqs.docker_hub_username || "" }));
-          }
-          if (awsPrereqs.terraform_exists) {
-            setTerraformExists(true);
-            setAwsStatus(awsPrereqs.aws_deployment_status || "terraform_generated");
-          }
-        } catch {
-          // AWS prerequisites optional
-        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to load deploy context"
@@ -690,6 +666,14 @@ export const DeployPage: React.FC = () => {
             <div className="lg:col-span-6 flex flex-col gap-6">
               {deployMode === "monitor" && projectId ? (
                 <MonitoringDashboard projectId={projectId} />
+              ) : deployMode === "aws" && projectId ? (
+                <Card className="flex-1 flex flex-col p-8 overflow-y-auto custom-scroll bg-white/[0.02] border-white/5 shadow-2xl min-h-[500px]">
+                  <AWSDeployPanel
+                    projectId={projectId}
+                    onLog={(message) => setMessages((prev) => [...prev, { role: "ai", content: message }])}
+                    onTerraformGenerated={refreshExplorer}
+                  />
+                </Card>
               ) : (
                 <Card className="flex-1 flex flex-col p-0 overflow-hidden bg-white/[0.02] border-white/5 relative shadow-2xl min-h-[500px]">
                   <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/[0.03]">
@@ -819,51 +803,11 @@ export const DeployPage: React.FC = () => {
                         <Cloud size={18} className="text-orange-400" />
                         <h3 className="text-xs font-black uppercase tracking-widest text-white">CLOUD_UNIT</h3>
                       </div>
-                      <Badge variant={awsStatus === 'deployed' ? 'success' : 'default'}>{awsStatus.toUpperCase()}</Badge>
+                      <Badge variant="warning">AWS</Badge>
                     </div>
-
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-[10px] font-black uppercase tracking-widest text-gray-600 block mb-2">Region Path</label>
-                        <select
-                          value={awsConfig.aws_region}
-                          onChange={(e) => setAwsConfig(prev => ({ ...prev, aws_region: e.target.value }))}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white focus:outline-none"
-                        >
-                          <option value="us-east-1">US-EAST-1 (Standard)</option>
-                          <option value="eu-west-1">EU-WEST-1 (Eir)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      <Button variant="secondary" onClick={async () => {
-                        if (!projectId) return;
-                        setIsDeploying(true);
-                        setMessages(prev => [...prev, { role: "ai", content: "Generating Terraform Layer..." }]);
-                        try {
-                          const result = await apiClient.generateTerraform(projectId, awsConfig);
-                          setAwsStatus("terraform_generated");
-                          setMessages(prev => [...prev, { role: "ai", content: `Layer Generated at ${result.terraform_path}` }]);
-                          await refreshExplorer();
-                        } catch (err: any) {
-                          setMessages(prev => [...prev, { role: "ai", content: `Layer Fail: ${err.message}` }]);
-                        }
-                        setIsDeploying(false);
-                      }} disabled={isDeploying || !awsConfig.docker_repo_prefix}>GEN_INFRA</Button>
-
-                      <Button variant="primary" className="bg-orange-500 hover:bg-orange-600" onClick={() => {
-                        if (!projectId) return;
-                        setIsDeploying(true);
-                        streamAWSTerraform(projectId, "apply", (ev) => setTerraformLogs(prev => [...prev, ev]), () => { setIsDeploying(false); setAwsStatus("deployed"); }, (err) => { setIsDeploying(false); setMessages(prev => [...prev, { role: "ai", content: err.message }]); });
-                      }} disabled={isDeploying || (awsStatus === "not_deployed" && !terraformExists)}>DEPLOY_CLOUD</Button>
-                    </div>
-
-                    <div className="bg-[#050810] rounded-2xl p-6 font-mono text-[10px] border border-white/5 h-[150px] overflow-y-auto custom-scroll">
-                      {terraformLogs.length === 0 ? <p className="text-gray-700 italic">No cloud logs.</p> : terraformLogs.map((l, i) => (
-                        <div key={i} className={l.type === 'error' ? 'text-rose-400' : 'text-gray-500'}>[{l.stage || 'tf'}] {l.message}</div>
-                      ))}
-                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                      Configure, deploy, and manage AWS infrastructure in the main panel.
+                    </p>
                   </>
                 )}
               </Card>

@@ -1,12 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  Cloud,
+  Globe,
+  MapPin,
+  PauseCircle,
+  PlayCircle,
+  Rocket,
+  Settings,
+  Terminal,
+  Trash2,
+  Wrench,
+} from 'lucide-react';
 import { apiClient, streamAWSTerraform } from '../api/client';
 import { Button } from './Button';
 import { Alert } from './Alert';
+import { Badge } from './Badge';
 import { LoadingSpinner } from './LoadingSpinner';
 
 interface AWSDeployPanelProps {
   projectId: string;
+  /** Called after any operation that changes deployment state (generate/apply/destroy/scale). */
   onStatusChange?: () => void;
+  /**
+   * Optional hook for surfacing lifecycle messages to a host-owned log/chat
+   * feed (e.g. DeployPage's AI chat sidebar). Not required for standalone use.
+   */
+  onLog?: (message: string) => void;
+  /** Called after Terraform is successfully generated (e.g. to refresh a file explorer). */
+  onTerraformGenerated?: () => void;
 }
 
 interface AWSConfig {
@@ -22,8 +43,23 @@ interface AWSStatus {
   aws_deployment_status: string;
   aws_region?: string;
   aws_frontend_url?: string;
+  aws_ecs_cluster_id?: string;
+  aws_last_deployed?: string;
   docker_push_success: boolean;
   live_alb_url?: string;
+  live_cluster_name?: string;
+  live_vpc_id?: string;
+}
+
+interface AWSPrerequisites {
+  can_deploy: boolean;
+  issues: string[];
+  project_name: string;
+  aws_region: string;
+  docker_push_success: boolean;
+  docker_hub_username?: string;
+  terraform_exists?: boolean;
+  aws_deployment_status?: string;
 }
 
 interface TerraformEvent {
@@ -31,6 +67,8 @@ interface TerraformEvent {
   message: string;
   stage?: string;
 }
+
+type TerraformOperation = 'apply' | 'destroy' | 'scale-zero' | 'scale-up';
 
 const AWS_REGIONS = [
   { value: 'us-east-1', label: 'US East (N. Virginia)' },
@@ -50,17 +88,41 @@ const DB_ENGINES = [
   { value: 'mysql', label: 'MySQL (RDS)' },
 ];
 
-const AWSDeployPanel: React.FC<AWSDeployPanelProps> = ({ 
-  projectId, 
-  onStatusChange 
+const STATUS_BADGE_VARIANT: Record<string, 'default' | 'warning' | 'info' | 'success' | 'error' | 'purple'> = {
+  not_deployed: 'default',
+  terraform_generated: 'warning',
+  deploying: 'info',
+  deployed: 'success',
+  failed: 'error',
+  scaled_to_zero: 'purple',
+};
+
+const LOG_COLOR: Record<string, string> = {
+  error: 'text-rose-400',
+  warning: 'text-amber-400',
+  success: 'text-emerald-400',
+  info: 'text-gray-400',
+};
+
+const inputClass =
+  'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50 transition-colors';
+const labelClass = 'text-[10px] font-black uppercase tracking-widest text-gray-600 block mb-2';
+
+const AWSDeployPanel: React.FC<AWSDeployPanelProps> = ({
+  projectId,
+  onStatusChange,
+  onLog,
+  onTerraformGenerated,
 }) => {
   const [status, setStatus] = useState<AWSStatus | null>(null);
+  const [prerequisites, setPrerequisites] = useState<AWSPrerequisites | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(false);
-  const [terraformLogs, setTerraformLogs] = useState<TerraformEvent[]>([]);
+  const [generating, setGenerating] = useState(false);
   const [isDeploying, setIsDeploying] = useState(false);
-  
+  const [terraformLogs, setTerraformLogs] = useState<TerraformEvent[]>([]);
+
   const [config, setConfig] = useState<AWSConfig>({
     aws_region: 'us-east-1',
     docker_repo_prefix: '',
@@ -70,73 +132,92 @@ const AWSDeployPanel: React.FC<AWSDeployPanelProps> = ({
     desired_count: 1,
   });
 
-  // Load status on mount
-  useEffect(() => {
-    loadStatus();
-  }, [projectId]);
-
-  const loadStatus = async () => {
+  const loadStatus = useCallback(async () => {
+    if (!projectId) return;
     try {
-      setLoading(true);
       const result = await apiClient.getAWSStatus(projectId);
       setStatus(result);
-      setError(null);
     } catch (err: any) {
-      setError(err.message || 'Failed to load AWS status');
-    } finally {
-      setLoading(false);
+      setError(err?.message || 'Failed to load AWS status');
     }
-  };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+
+      const [statusResult, prereqResult] = await Promise.allSettled([
+        apiClient.getAWSStatus(projectId),
+        apiClient.checkAWSPrerequisites(projectId),
+      ]);
+
+      if (cancelled) return;
+
+      if (statusResult.status === 'fulfilled') {
+        setStatus(statusResult.value);
+      } else {
+        setError(statusResult.reason?.message || 'Failed to load AWS status');
+      }
+
+      if (prereqResult.status === 'fulfilled') {
+        const prereqs = prereqResult.value;
+        setPrerequisites(prereqs);
+        setConfig((prev) => ({
+          ...prev,
+          docker_repo_prefix: prev.docker_repo_prefix || prereqs.docker_hub_username || '',
+        }));
+      }
+
+      setLoading(false);
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const handleGenerateTerraform = async () => {
+    if (!projectId) return;
+    setError(null);
+    setGenerating(true);
+    onLog?.('Generating Terraform layer...');
+
     try {
-      setError(null);
-      setLoading(true);
-      
-      await apiClient.generateTerraform(projectId, {
+      const result = await apiClient.generateTerraform(projectId, {
         aws_region: config.aws_region,
         docker_repo_prefix: config.docker_repo_prefix,
         db_engine: config.db_engine !== 'none' ? config.db_engine : undefined,
         mongo_db_url: config.db_engine === 'mongo' ? config.mongo_db_url : undefined,
-        rds_db_url: config.db_engine !== 'none' && config.db_engine !== 'mongo' ? config.rds_db_url : undefined,
+        rds_db_url:
+          config.db_engine !== 'none' && config.db_engine !== 'mongo' ? config.rds_db_url : undefined,
         desired_count: config.desired_count,
       });
-      
+
       await loadStatus();
       setShowConfig(false);
+      onLog?.(`Terraform layer generated at ${result.terraform_path}`);
+      onTerraformGenerated?.();
       onStatusChange?.();
     } catch (err: any) {
-      setError(err.message || 'Failed to generate Terraform');
+      const msg = err?.message || 'Failed to generate Terraform';
+      setError(msg);
+      onLog?.(`Terraform generation failed: ${msg}`);
     } finally {
-      setLoading(false);
+      setGenerating(false);
     }
   };
 
-  const handleApply = () => {
-    setIsDeploying(true);
-    setTerraformLogs([]);
-    setError(null);
-
-    streamAWSTerraform(
-      projectId,
-      'apply',
-      (event) => {
-        setTerraformLogs(prev => [...prev, event]);
-      },
-      () => {
-        setIsDeploying(false);
-        loadStatus();
-        onStatusChange?.();
-      },
-      (err) => {
-        setError(err.message);
-        setIsDeploying(false);
-      }
-    );
-  };
-
-  const handleDestroy = () => {
-    if (!window.confirm('⚠️ This will permanently delete all AWS resources. Are you sure?')) {
+  const runOperation = (operation: TerraformOperation) => {
+    if (!projectId) return;
+    if (
+      operation === 'destroy' &&
+      !window.confirm('This will permanently delete all AWS resources. Are you sure?')
+    ) {
       return;
     }
 
@@ -146,9 +227,9 @@ const AWSDeployPanel: React.FC<AWSDeployPanelProps> = ({
 
     streamAWSTerraform(
       projectId,
-      'destroy',
+      operation,
       (event) => {
-        setTerraformLogs(prev => [...prev, event]);
+        setTerraformLogs((prev) => [...prev, event]);
       },
       () => {
         setIsDeploying(false);
@@ -156,360 +237,226 @@ const AWSDeployPanel: React.FC<AWSDeployPanelProps> = ({
         onStatusChange?.();
       },
       (err) => {
-        setError(err.message);
         setIsDeploying(false);
+        setError(err.message);
+        onLog?.(err.message);
       }
     );
   };
 
-  const handleScaleToZero = () => {
-    setIsDeploying(true);
-    setTerraformLogs([]);
-
-    streamAWSTerraform(
-      projectId,
-      'scale-zero',
-      (event) => {
-        setTerraformLogs(prev => [...prev, event]);
-      },
-      () => {
-        setIsDeploying(false);
-        loadStatus();
-      },
-      (err) => {
-        setError(err.message);
-        setIsDeploying(false);
-      }
-    );
-  };
-
-  if (loading && !status) {
+  if (loading && !status && !prerequisites) {
     return (
-      <div className="aws-deploy-panel loading">
-        <LoadingSpinner />
-        <p>Loading AWS status...</p>
+      <div className="flex flex-col items-center justify-center py-12">
+        <LoadingSpinner message="Loading AWS status..." fullScreen={false} size="sm" />
       </div>
     );
   }
 
-  const canDeploy = status?.docker_push_success;
-  const isDeployed = status?.aws_deployment_status === 'deployed';
-  const hasTerraform = status?.aws_deployment_status === 'terraform_generated' || isDeployed;
+  const deploymentStatus =
+    status?.aws_deployment_status || prerequisites?.aws_deployment_status || 'not_deployed';
+  const canDeploy = status?.docker_push_success ?? prerequisites?.docker_push_success ?? false;
+  const isDeployed = deploymentStatus === 'deployed';
+  const isScaledToZero = deploymentStatus === 'scaled_to_zero';
+  const hasTerraform =
+    deploymentStatus === 'terraform_generated' ||
+    isDeployed ||
+    isScaledToZero ||
+    !!prerequisites?.terraform_exists;
+
+  const prereqIssuesMessage =
+    prerequisites && prerequisites.issues && prerequisites.issues.length > 0
+      ? prerequisites.issues.join(' ')
+      : 'Push Docker images first to enable AWS deployment.';
 
   return (
-    <div className="aws-deploy-panel">
-      <div className="aws-deploy-header">
-        <h3>☁️ AWS Deployment</h3>
-        <span className={`status-badge ${status?.aws_deployment_status || 'not_deployed'}`}>
-          {status?.aws_deployment_status?.replace(/_/g, ' ') || 'Not Deployed'}
-        </span>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2.5">
+          <Cloud size={18} className="text-orange-400" />
+          AWS Deployment
+        </h3>
+        <Badge variant={STATUS_BADGE_VARIANT[deploymentStatus] || 'default'}>
+          {deploymentStatus.replace(/_/g, ' ').toUpperCase()}
+        </Badge>
       </div>
 
-      {error && <Alert type="error" message={error} />}
+      {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-      {!canDeploy && (
-        <Alert type="warning" message="Push Docker images first to enable AWS deployment." />
-      )}
+      {!canDeploy && <Alert type="warning" message={prereqIssuesMessage} />}
 
-      {/* Deployed state */}
-      {isDeployed && status?.live_alb_url && (
-        <div className="aws-deployed-info">
-          <div className="info-row">
-            <span className="label">🌐 Frontend URL:</span>
-            <a 
-              href={`http://${status.live_alb_url}`} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="alb-url"
-            >
-              {status.live_alb_url}
-            </a>
-          </div>
-          <div className="info-row">
-            <span className="label">📍 Region:</span>
-            <span>{status.aws_region}</span>
-          </div>
-          <div className="aws-actions">
-            <Button onClick={handleScaleToZero} disabled={isDeploying} variant="secondary">
-              ⏸️ Scale to Zero
-            </Button>
-            <Button onClick={handleDestroy} disabled={isDeploying} variant="danger">
-              🗑️ Destroy
+      {(isDeployed || isScaledToZero) && (
+        <div className="bg-emerald-500/[0.04] border border-emerald-500/20 rounded-2xl p-6 space-y-4">
+          {status?.live_alb_url && (
+            <div className="flex items-center gap-3 text-sm">
+              <Globe size={14} className="text-emerald-400 shrink-0" />
+              <span className="text-gray-500 font-bold uppercase tracking-widest text-[10px] shrink-0">
+                Frontend URL
+              </span>
+              <a
+                href={`http://${status.live_alb_url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-400 hover:text-cyan-300 hover:underline truncate"
+              >
+                {status.live_alb_url}
+              </a>
+            </div>
+          )}
+          {status?.aws_region && (
+            <div className="flex items-center gap-3 text-sm">
+              <MapPin size={14} className="text-emerald-400 shrink-0" />
+              <span className="text-gray-500 font-bold uppercase tracking-widest text-[10px] shrink-0">
+                Region
+              </span>
+              <span className="text-white font-medium">{status.aws_region}</span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3 pt-2">
+            {isDeployed && (
+              <Button onClick={() => runOperation('scale-zero')} disabled={isDeploying} variant="secondary">
+                <PauseCircle size={14} /> Scale to Zero
+              </Button>
+            )}
+            {isScaledToZero && (
+              <Button onClick={() => runOperation('scale-up')} disabled={isDeploying} variant="secondary">
+                <PlayCircle size={14} /> Scale Up
+              </Button>
+            )}
+            <Button onClick={() => runOperation('destroy')} disabled={isDeploying} variant="danger">
+              <Trash2 size={14} /> Destroy
             </Button>
           </div>
         </div>
       )}
 
-      {/* Config form */}
       {showConfig && (
-        <div className="aws-config-form">
-          <div className="form-group">
-            <label>AWS Region</label>
-            <select 
+        <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-6 space-y-5">
+          <div>
+            <label className={labelClass}>AWS Region</label>
+            <select
+              className={inputClass}
               value={config.aws_region}
-              onChange={e => setConfig(prev => ({ ...prev, aws_region: e.target.value }))}
+              onChange={(e) => setConfig((prev) => ({ ...prev, aws_region: e.target.value }))}
             >
-              {AWS_REGIONS.map(r => (
-                <option key={r.value} value={r.value}>{r.label}</option>
+              {AWS_REGIONS.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
               ))}
             </select>
           </div>
 
-          <div className="form-group">
-            <label>Docker Hub Username</label>
+          <div>
+            <label className={labelClass}>Docker Hub Username</label>
             <input
               type="text"
+              className={inputClass}
               placeholder="e.g., yourusername"
               value={config.docker_repo_prefix}
-              onChange={e => setConfig(prev => ({ ...prev, docker_repo_prefix: e.target.value }))}
+              onChange={(e) => setConfig((prev) => ({ ...prev, docker_repo_prefix: e.target.value }))}
             />
           </div>
 
-          <div className="form-group">
-            <label>Database Engine</label>
-            <select 
+          <div>
+            <label className={labelClass}>Database Engine</label>
+            <select
+              className={inputClass}
               value={config.db_engine}
-              onChange={e => setConfig(prev => ({ ...prev, db_engine: e.target.value }))}
+              onChange={(e) => setConfig((prev) => ({ ...prev, db_engine: e.target.value }))}
             >
-              {DB_ENGINES.map(d => (
-                <option key={d.value} value={d.value}>{d.label}</option>
+              {DB_ENGINES.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
               ))}
             </select>
           </div>
 
           {config.db_engine === 'mongo' && (
-            <div className="form-group">
-              <label>MongoDB Connection URL</label>
+            <div>
+              <label className={labelClass}>MongoDB Connection URL</label>
               <input
                 type="password"
+                className={inputClass}
                 placeholder="mongodb+srv://..."
                 value={config.mongo_db_url}
-                onChange={e => setConfig(prev => ({ ...prev, mongo_db_url: e.target.value }))}
+                onChange={(e) => setConfig((prev) => ({ ...prev, mongo_db_url: e.target.value }))}
               />
             </div>
           )}
 
           {config.db_engine !== 'none' && config.db_engine !== 'mongo' && (
-            <div className="form-group">
-              <label>RDS Connection URL</label>
+            <div>
+              <label className={labelClass}>RDS Connection URL</label>
               <input
                 type="password"
+                className={inputClass}
                 placeholder="postgresql://..."
                 value={config.rds_db_url}
-                onChange={e => setConfig(prev => ({ ...prev, rds_db_url: e.target.value }))}
+                onChange={(e) => setConfig((prev) => ({ ...prev, rds_db_url: e.target.value }))}
               />
             </div>
           )}
 
-          <div className="form-group">
-            <label>Desired Task Count</label>
+          <div>
+            <label className={labelClass}>Desired Task Count</label>
             <input
               type="number"
-              min="1"
-              max="10"
+              min={1}
+              max={10}
+              className={inputClass}
               value={config.desired_count}
-              onChange={e => setConfig(prev => ({ ...prev, desired_count: parseInt(e.target.value) || 1 }))}
+              onChange={(e) =>
+                setConfig((prev) => ({ ...prev, desired_count: parseInt(e.target.value, 10) || 1 }))
+              }
             />
           </div>
 
-          <div className="form-actions">
+          <div className="flex justify-end gap-3 pt-2">
             <Button onClick={() => setShowConfig(false)} variant="secondary">
               Cancel
             </Button>
-            <Button 
-              onClick={handleGenerateTerraform} 
-              disabled={!config.docker_repo_prefix || loading}
+            <Button
+              onClick={handleGenerateTerraform}
+              disabled={!config.docker_repo_prefix || generating}
+              loading={generating}
             >
-              {loading ? <LoadingSpinner /> : '🏗️ Generate Terraform'}
+              <Wrench size={14} /> Generate Terraform
             </Button>
           </div>
         </div>
       )}
 
-      {/* Action buttons */}
-      {!showConfig && !isDeployed && (
-        <div className="aws-actions">
+      {!showConfig && !isDeployed && !isScaledToZero && (
+        <div className="flex gap-3">
           {!hasTerraform ? (
-            <Button 
-              onClick={() => setShowConfig(true)} 
-              disabled={!canDeploy}
-            >
-              ⚙️ Configure AWS
+            <Button onClick={() => setShowConfig(true)} disabled={!canDeploy}>
+              <Settings size={14} /> Configure AWS
             </Button>
           ) : (
-            <Button 
-              onClick={handleApply} 
-              disabled={isDeploying}
-            >
-              {isDeploying ? <LoadingSpinner /> : '🚀 Deploy to AWS'}
+            <Button onClick={() => runOperation('apply')} disabled={isDeploying} loading={isDeploying}>
+              <Rocket size={14} /> Deploy to AWS
             </Button>
           )}
         </div>
       )}
 
-      {/* Terraform logs */}
       {terraformLogs.length > 0 && (
-        <div className="terraform-logs">
-          <h4>Terraform Output</h4>
-          <div className="log-container">
+        <div>
+          <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3 flex items-center gap-2">
+            <Terminal size={12} /> Terraform Output
+          </h4>
+          <div className="bg-[#050810] rounded-2xl p-5 font-mono text-[11px] border border-white/5 max-h-[300px] overflow-y-auto custom-scroll">
             {terraformLogs.map((log, i) => (
-              <div key={i} className={`log-line ${log.type}`}>
-                <span className="stage">[{log.stage}]</span>
-                <span className="message">{log.message}</span>
+              <div key={i} className={`mb-1 leading-relaxed ${LOG_COLOR[log.type] || 'text-gray-400'}`}>
+                <span className="text-gray-600 mr-2">[{(log.stage || 'tf').toUpperCase()}]</span>
+                {log.message}
               </div>
             ))}
           </div>
         </div>
       )}
-
-      <style>{`
-        .aws-deploy-panel {
-          background: var(--bg-secondary, #1e1e2e);
-          border-radius: 12px;
-          padding: 20px;
-          margin-top: 16px;
-        }
-
-        .aws-deploy-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 16px;
-        }
-
-        .aws-deploy-header h3 {
-          margin: 0;
-          font-size: 1.2rem;
-        }
-
-        .status-badge {
-          padding: 4px 12px;
-          border-radius: 20px;
-          font-size: 0.85rem;
-          font-weight: 500;
-        }
-
-        .status-badge.not_deployed { background: #6b7280; }
-        .status-badge.terraform_generated { background: #f59e0b; }
-        .status-badge.deploying { background: #3b82f6; }
-        .status-badge.deployed { background: #10b981; color: #fff; }
-        .status-badge.failed { background: #ef4444; color: #fff; }
-        .status-badge.scaled_to_zero { background: #8b5cf6; }
-
-        .aws-deployed-info {
-          background: rgba(16, 185, 129, 0.1);
-          border: 1px solid rgba(16, 185, 129, 0.3);
-          border-radius: 8px;
-          padding: 16px;
-          margin-bottom: 16px;
-        }
-
-        .info-row {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 8px;
-        }
-
-        .info-row .label {
-          font-weight: 500;
-          min-width: 120px;
-        }
-
-        .alb-url {
-          color: #3b82f6;
-          text-decoration: none;
-        }
-
-        .alb-url:hover {
-          text-decoration: underline;
-        }
-
-        .aws-actions {
-          display: flex;
-          gap: 12px;
-          margin-top: 16px;
-        }
-
-        .aws-config-form {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 8px;
-          padding: 16px;
-        }
-
-        .form-group {
-          margin-bottom: 16px;
-        }
-
-        .form-group label {
-          display: block;
-          margin-bottom: 6px;
-          font-weight: 500;
-          font-size: 0.9rem;
-        }
-
-        .form-group input,
-        .form-group select {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          border-radius: 6px;
-          background: rgba(0, 0, 0, 0.2);
-          color: inherit;
-          font-size: 0.95rem;
-        }
-
-        .form-actions {
-          display: flex;
-          justify-content: flex-end;
-          gap: 12px;
-          margin-top: 20px;
-        }
-
-        .terraform-logs {
-          margin-top: 20px;
-          border-top: 1px solid rgba(255, 255, 255, 0.1);
-          padding-top: 16px;
-        }
-
-        .terraform-logs h4 {
-          margin: 0 0 12px 0;
-          font-size: 0.95rem;
-        }
-
-        .log-container {
-          background: #0d0d0d;
-          border-radius: 8px;
-          padding: 12px;
-          max-height: 300px;
-          overflow-y: auto;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 0.8rem;
-        }
-
-        .log-line {
-          display: flex;
-          gap: 8px;
-          padding: 2px 0;
-        }
-
-        .log-line .stage {
-          color: #6b7280;
-          min-width: 70px;
-        }
-
-        .log-line.error .message { color: #ef4444; }
-        .log-line.warning .message { color: #f59e0b; }
-        .log-line.success .message { color: #10b981; }
-        .log-line.info .message { color: #a5b4fc; }
-
-        .loading {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 12px;
-          padding: 40px;
-        }
-      `}</style>
     </div>
   );
 };
