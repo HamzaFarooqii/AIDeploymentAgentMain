@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 from bson import ObjectId
 from fastapi import HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from ..LLM.docker_deploy_agent import run_docker_deploy_chat, run_docker_deploy_chat_stream
 from ..config.database import get_projects_collection
@@ -428,7 +429,12 @@ async def docker_chat_handler(
 
     services = _augment_services_runtime_hints(services, project_root, refresh_env=False)
 
-    reply = run_docker_deploy_chat(
+    # run_docker_deploy_chat makes a synchronous (requests-based) LLM call that can
+    # take a long time; calling it directly here would block the whole event loop
+    # (and therefore every other concurrent request, including health checks) for
+    # the duration of the call. Offload it to a worker thread instead.
+    reply = await run_in_threadpool(
+        run_docker_deploy_chat,
         project_name=project.get("project_name", "project"),
         metadata=metadata,
         dockerfiles=dockerfiles,

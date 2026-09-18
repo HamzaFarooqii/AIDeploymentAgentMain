@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 
 from bson import ObjectId
 from fastapi import HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from ..config.database import get_projects_collection
 from ..utils.auth import decode_access_token
@@ -370,9 +371,13 @@ async def check_readiness_handler(project_id: str, current_user: dict) -> Dict:
     need_docker = not file_status["Dockerfile"]
     need_compose = not file_status["docker-compose.yml"]
 
+    # _generate_docker_files / _generate_k8s_files make a synchronous
+    # (requests-based) LLM call under the hood; calling them directly here would
+    # block the whole event loop for the duration of the call. Offload to a thread.
     if need_docker or need_compose:
         try:
-            docker_gen = _generate_docker_files(
+            docker_gen = await run_in_threadpool(
+                _generate_docker_files,
                 project_root=project_root,
                 project_name=project_name,
                 metadata=metadata,
@@ -387,7 +392,8 @@ async def check_readiness_handler(project_id: str, current_user: dict) -> Dict:
     # Step 3: Generate missing k8s manifests
     if not file_status["k8s/deployment.yaml"] or not file_status["k8s/service.yaml"]:
         try:
-            k8s_gen = _generate_k8s_files(
+            k8s_gen = await run_in_threadpool(
+                _generate_k8s_files,
                 project_root=project_root,
                 project_name=project_name,
                 metadata=metadata,

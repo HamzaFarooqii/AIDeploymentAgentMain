@@ -4,15 +4,53 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
 
-try:
-    import torch
-    from transformers import AutoTokenizer, AutoModel
-    import numpy as np
-    from sklearn.metrics.pairwise import cosine_similarity
-    HAS_ML = True
-except ImportError as e:
-    print(f"⚠️ ML libraries not available: {e}")
-    HAS_ML = False
+# torch/transformers/scikit-learn take 10+ seconds combined to import. They are
+# only needed by the optional ML detection fallback (see detector.py's
+# detect_framework(), which only reaches this path when heuristic detection has
+# low confidence), so importing them at module load time would pay that cost on
+# EVERY server startup / every `import app.utils.ml_analyzer` (including
+# transitively via app.utils.detector -> app.controllers.analyze_controller ->
+# app.main), even for requests that never touch ML detection. Instead, import
+# them lazily on first real use via _ensure_ml_imports().
+#
+# The module-level placeholders below (None) let tests keep using
+# `@patch('app.utils.ml_analyzer.AutoTokenizer')` / `AutoModel`: a lazy import
+# only overwrites a name that is still None, so a test-installed mock is never
+# clobbered by a subsequent real import attempt.
+HAS_ML = False
+_ml_import_attempted = False
+torch = None
+AutoTokenizer = None
+AutoModel = None
+cosine_similarity = None
+
+
+def _ensure_ml_imports() -> bool:
+    """Import torch/transformers/scikit-learn on first use; cached after that."""
+    global HAS_ML, _ml_import_attempted, torch, AutoTokenizer, AutoModel, cosine_similarity
+
+    if _ml_import_attempted:
+        return HAS_ML
+    _ml_import_attempted = True
+
+    try:
+        import torch as _torch
+        from transformers import AutoTokenizer as _AutoTokenizer, AutoModel as _AutoModel
+        from sklearn.metrics.pairwise import cosine_similarity as _cosine_similarity
+
+        if torch is None:
+            torch = _torch
+        if AutoTokenizer is None:
+            AutoTokenizer = _AutoTokenizer
+        if AutoModel is None:
+            AutoModel = _AutoModel
+        if cosine_similarity is None:
+            cosine_similarity = _cosine_similarity
+        HAS_ML = True
+    except ImportError as e:
+        print(f"⚠️ ML libraries not available: {e}")
+        HAS_ML = False
+    return HAS_ML
 
 
 
@@ -25,7 +63,7 @@ class MLCodeAnalyzer:
         self.device = "cpu"  # Force CPU for stability
         self.language_embeddings = {}
         self.framework_embeddings = {}
-        self.ml_available = HAS_ML
+        self.ml_available = _ensure_ml_imports()
         
         # Language signatures for embedding
         self.language_signatures = {
@@ -52,7 +90,7 @@ class MLCodeAnalyzer:
             "Rails": "ActiveRecord has_many belongs_to validates before_action",
         }
         
-        if HAS_ML:
+        if self.ml_available:
             self._initialize_model()
             if self.model:
                 self._initialize_embeddings()

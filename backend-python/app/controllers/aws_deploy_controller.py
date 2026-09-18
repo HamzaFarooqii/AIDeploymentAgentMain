@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Any
 import yaml
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from bson import ObjectId
 
 from ..config.database import get_projects_collection
@@ -1003,7 +1004,11 @@ async def generate_terraform_handler(
         # Generate Terraform via LLM
         print(f"🏗️ Generating Terraform for project: {project_name}")
         
-        terraform_code = run_terraform_deploy_chat(
+        # run_terraform_deploy_chat makes a synchronous (requests-based) LLM call
+        # that can take a long time; calling it directly here would block the
+        # whole event loop for the duration of the call. Offload it to a thread.
+        terraform_code = await run_in_threadpool(
+            run_terraform_deploy_chat,
             project_name=project_name,
             services=services,
             docker_repo_prefix=aws_config.get("docker_repo_prefix", ""),
@@ -1376,8 +1381,10 @@ async def fix_terraform_handler(
     print(f"🔧 Fixing Terraform for {project_name}...")
     print(f"   Error: {error_output[:200]}...")
     
-    # Call LLM to fix
-    fixed_terraform = fix_terraform_error(
+    # Call LLM to fix. fix_terraform_error is a synchronous (requests-based) LLM
+    # call; offload it to a thread so it doesn't block the event loop.
+    fixed_terraform = await run_in_threadpool(
+        fix_terraform_error,
         current_terraform=current_terraform,
         error_output=error_output,
         project_name=project_name
