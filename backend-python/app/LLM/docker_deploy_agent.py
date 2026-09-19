@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 from .llm_client import (
     call_gemini,
+    call_groq,
     call_llama,
     call_llama_stream,
     get_docker_llm_provider,
@@ -1184,7 +1185,11 @@ def _response_message(
     source_files: Optional[List[Dict[str, str]]] = None,
 ) -> tuple[str, str]:
     source_files = source_files or []
-    if get_docker_llm_provider() == "gemini":
+    # Groq serves capable instruction-tuned chat models over a clean
+    # OpenAI-style messages API - much closer in nature to Gemini's setup
+    # than to a small local Ollama model needing heavy few-shot guidance -
+    # so it shares Gemini's terse JSON-payload prompt path.
+    if get_docker_llm_provider() in ("gemini", "groq"):
         system_prompt = (
             GEMINI_DOCKER_SYSTEM_PROMPT
             if mode == "GENERATE_MISSING"
@@ -1549,7 +1554,7 @@ def parse_and_validate_generated_docker_response(
     return files, errors
 
 
-def _call_gemini_docker_with_repair(
+def _call_llm_docker_with_repair(
     messages: List[Dict[str, str]],
     project_name: str,
     metadata: Dict,
@@ -1562,9 +1567,18 @@ def _call_gemini_docker_with_repair(
     services: Optional[List[Dict[str, str]]],
     mode: str,
     source_files: Optional[List[Dict[str, str]]] = None,
+    call_fn=None,
 ) -> str:
+    """
+    Self-repair loop shared by the Gemini and Groq providers: both consume the
+    same terse JSON-payload prompt contract (see _response_message), so both
+    get the same validate-then-regenerate-on-error behavior. `call_fn` is the
+    single-call LLM function to use (call_gemini or call_groq); it defaults to
+    call_gemini for backward compatibility with existing callers.
+    """
     source_files = source_files or []
-    response = call_gemini(messages, custom_options={"temperature": 0.0})
+    llm_call = call_fn or call_gemini
+    response = llm_call(messages, custom_options={"temperature": 0.0})
     if response.startswith("ERROR:") or mode != "GENERATE_MISSING" or not services:
         return response
 
@@ -1594,7 +1608,7 @@ def _call_gemini_docker_with_repair(
         services=services,
         mode=mode,
     )
-    return call_gemini(
+    return llm_call(
         [
             {"role": "system", "content": repair_system_prompt},
             {"role": "user", "content": repair_message},
@@ -1645,8 +1659,9 @@ def run_docker_deploy_chat(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": message},
     ]
-    if get_docker_llm_provider() == "gemini":
-        return _call_gemini_docker_with_repair(
+    provider = get_docker_llm_provider()
+    if provider in ("gemini", "groq"):
+        return _call_llm_docker_with_repair(
             messages=messages,
             project_name=project_name,
             metadata=metadata,
@@ -1659,6 +1674,7 @@ def run_docker_deploy_chat(
             extra_instructions=extra_instructions,
             services=services,
             mode=mode,
+            call_fn=call_groq if provider == "groq" else call_gemini,
         )
     return call_llama(messages)
 
@@ -1705,8 +1721,9 @@ def run_docker_deploy_chat_stream(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": message},
     ]
-    if get_docker_llm_provider() == "gemini":
-        response = _call_gemini_docker_with_repair(
+    provider = get_docker_llm_provider()
+    if provider in ("gemini", "groq"):
+        response = _call_llm_docker_with_repair(
             messages=messages,
             project_name=project_name,
             metadata=metadata,
@@ -1719,6 +1736,7 @@ def run_docker_deploy_chat_stream(
             extra_instructions=extra_instructions,
             services=services,
             mode=mode,
+            call_fn=call_groq if provider == "groq" else call_gemini,
         )
         if response.startswith("ERROR:"):
             yield {"token": response, "done": True, "error": True}
@@ -1864,9 +1882,19 @@ def run_k8s_manifest_generation(
         {"role": "user", "content": message},
     ]
 
-    response = call_gemini(messages, custom_options={"temperature": 0.0})
+    # K8s manifest generation previously always called Gemini regardless of
+    # DOCKER_LLM_PROVIDER (the same kind of bypass the Terraform agent had).
+    # Route it through the same provider switch as Docker generation so Groq
+    # (and Ollama) are usable here too.
+    provider = get_docker_llm_provider()
+    if provider == "groq":
+        response = call_groq(messages, custom_options={"temperature": 0.0})
+    elif provider == "ollama":
+        response = call_llama(messages, custom_options={"temperature": 0.0})
+    else:
+        response = call_gemini(messages, custom_options={"temperature": 0.0})
     if response.startswith("ERROR:"):
-        print(f"[k8s manifest gen] Gemini error: {response}")
+        print(f"[k8s manifest gen] {provider} error: {response}")
         return {}
 
     files = parse_generated_k8s_files(response)

@@ -51,13 +51,20 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 600
 
 
-    DOCKER_LLM_PROVIDER: str = "ollama"  # "ollama" or "gemini"
+    DOCKER_LLM_PROVIDER: str = "ollama"  # "ollama", "gemini", or "groq"
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_API_BASE: str = "https://generativelanguage.googleapis.com/v1beta"
     GEMINI_MODEL_NAME: str = "gemini-3.6-flash"
     GEMINI_MAX_OUTPUT_TOKENS: int = 8192
     GEMINI_FALLBACK_MODEL_NAME: Optional[str] = None
-    
+
+    # Groq (OpenAI-compatible chat completions) - free tier, hardware-accelerated
+    # inference. Model name is configurable here rather than hardcoded so it can
+    # be swapped later without a code change.
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_API_BASE: str = "https://api.groq.com/openai/v1"
+    GROQ_MODEL_NAME: str = "llama-3.3-70b-versatile"
+
     # AWS Deployment Configuration
     AWS_PROFILE: Optional[str] = None  # AWS CLI profile name (e.g., "my-terraform")
     AWS_DEFAULT_REGION: str = "us-east-1"

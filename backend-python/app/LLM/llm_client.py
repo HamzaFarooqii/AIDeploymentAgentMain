@@ -11,9 +11,20 @@ from ..config.settings import settings
 # the full request URL, which would otherwise leak the raw key.
 _API_KEY_QUERY_PATTERN = re.compile(r"([?&]key=)[^&\s'\"]+")
 
+# Matches an `Authorization: Bearer <token>` value (Groq's auth scheme) so it
+# can be stripped from any error text too. requests' ConnectionError/Timeout
+# messages are built from the connection target (host/port/path), not from
+# custom headers, so the Bearer token should never actually appear in one of
+# these strings in practice - but this is defensive in case a future requests
+# version, a proxy, or a different exception path ever echoes request headers
+# back into an exception message.
+_BEARER_TOKEN_PATTERN = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
+
 
 def _redact_api_key(text: str) -> str:
-    return _API_KEY_QUERY_PATTERN.sub(r"\1***REDACTED***", text)
+    text = _API_KEY_QUERY_PATTERN.sub(r"\1***REDACTED***", text)
+    text = _BEARER_TOKEN_PATTERN.sub(r"\1***REDACTED***", text)
+    return text
 
 
 def _request_with_retry(method: str, url: str, *, retries: int = 3, **kwargs) -> requests.Response:
@@ -53,6 +64,9 @@ GEMINI_API_BASE = settings.GEMINI_API_BASE.rstrip("/")
 GEMINI_MODEL_NAME = settings.GEMINI_MODEL_NAME
 GEMINI_MAX_OUTPUT_TOKENS = settings.GEMINI_MAX_OUTPUT_TOKENS
 GEMINI_FALLBACK_MODEL_NAME = settings.GEMINI_FALLBACK_MODEL_NAME
+GROQ_API_KEY = settings.GROQ_API_KEY
+GROQ_API_BASE = settings.GROQ_API_BASE.rstrip("/")
+GROQ_MODEL_NAME = settings.GROQ_MODEL_NAME
 
 
 def _messages_to_prompt(messages: List[Dict[str, str]]) -> str:
@@ -108,7 +122,7 @@ def _gemini_generation_config(custom_options: Optional[Dict] = None) -> Dict:
 
 def get_docker_llm_provider() -> str:
     provider = str(DOCKER_LLM_PROVIDER or "ollama").strip().lower()
-    return provider if provider in {"ollama", "gemini"} else "ollama"
+    return provider if provider in {"ollama", "gemini", "groq"} else "ollama"
 
 
 def call_llama(messages: List[Dict[str, str]], custom_options: Optional[Dict] = None) -> str:
@@ -338,14 +352,175 @@ def call_gemini_stream(messages: List[Dict[str, str]], custom_options: Optional[
     yield {"token": "", "done": True}
 
 
+def _groq_chat_payload(messages: List[Dict[str, str]], stream: bool, custom_options: Optional[Dict] = None) -> Dict:
+    """
+    Build the OpenAI-compatible chat-completions payload Groq expects. Unlike
+    Gemini, Groq consumes the same `messages` list this codebase already
+    passes around internally - no system/user splitting required.
+    """
+    payload: Dict = {
+        "model": GROQ_MODEL_NAME,
+        "messages": messages,
+        "temperature": LLM_TEMPERATURE,
+        "top_p": LLM_TOP_P,
+        "stream": stream,
+    }
+    if not custom_options:
+        return payload
+
+    option_map = {
+        "temperature": "temperature",
+        "top_p": "top_p",
+        "topP": "top_p",
+        "max_tokens": "max_tokens",
+        "max_output_tokens": "max_tokens",
+        "maxOutputTokens": "max_tokens",
+    }
+    for src, dest in option_map.items():
+        if src in custom_options:
+            payload[dest] = custom_options[src]
+    return payload
+
+
+def call_groq(messages: List[Dict[str, str]], custom_options: Optional[Dict] = None) -> str:
+    """
+    Call Groq's OpenAI-compatible chat completions endpoint
+    (POST {GROQ_API_BASE}/chat/completions) for Docker/K8s/Terraform generation.
+
+    Groq is free (no credit card required for its free tier) and fast
+    (hardware-accelerated inference). The model is configurable via
+    GROQ_MODEL_NAME (see settings.py), defaulting to llama-3.3-70b-versatile.
+    """
+    if not GROQ_API_KEY:
+        return "ERROR: GROQ_API_KEY is not set. Set it in backend-python/.env to use Groq."
+
+    url = f"{GROQ_API_BASE}/chat/completions"
+    try:
+        resp = _request_with_retry(
+            "POST",
+            url,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=_groq_chat_payload(messages, stream=False, custom_options=custom_options),
+            timeout=LLM_TIMEOUT,
+        )
+        resp.raise_for_status()
+
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return f"ERROR: Groq returned no choices. Response: {str(data)[:500]}"
+
+        content = ((choices[0].get("message") or {}).get("content") or "")
+        if not content.strip():
+            finish_reason = choices[0].get("finish_reason")
+            return f"ERROR: Groq returned an empty response. Finish reason: {finish_reason}"
+        return content
+    except requests.exceptions.ConnectionError as e:
+        return f"ERROR: Cannot connect to Groq API at {GROQ_API_BASE}. Details: {_redact_api_key(str(e))}"
+    except requests.exceptions.Timeout:
+        return f"ERROR: Groq request timed out after {LLM_TIMEOUT} seconds."
+    except requests.exceptions.HTTPError as e:
+        return f"ERROR: Groq HTTP {e.response.status_code} - {e.response.reason}. URL: {url}"
+    except Exception as e:
+        import traceback
+        return f"ERROR: Groq call failed - {_redact_api_key(str(e))}\nTraceback: {_redact_api_key(traceback.format_exc()[:500])}"
+
+
+def call_groq_stream(messages: List[Dict[str, str]], custom_options: Optional[Dict] = None):
+    """
+    Real SSE streaming version of call_groq (not a fake single-chunk adapter).
+    Parses `data: {...}` lines from Groq's streaming chat-completions response,
+    yielding each `choices[0].delta.content` token as it arrives, and a final
+    {"token": "", "done": True} when `data: [DONE]` is received or the stream
+    otherwise ends.
+    """
+    import json
+
+    if not GROQ_API_KEY:
+        yield {
+            "token": "ERROR: GROQ_API_KEY is not set. Set it in backend-python/.env to use Groq.",
+            "done": True,
+            "error": True,
+        }
+        return
+
+    url = f"{GROQ_API_BASE}/chat/completions"
+    try:
+        resp = _request_with_retry(
+            "POST",
+            url,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=_groq_chat_payload(messages, stream=True, custom_options=custom_options),
+            timeout=LLM_TIMEOUT,
+            stream=True,
+        )
+        resp.raise_for_status()
+
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            decoded = line.decode("utf-8") if isinstance(line, bytes) else line
+            decoded = decoded.strip()
+            if not decoded.startswith("data:"):
+                continue
+
+            data_str = decoded[len("data:"):].strip()
+            if data_str == "[DONE]":
+                yield {"token": "", "done": True}
+                return
+
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+
+            delta = choices[0].get("delta") or {}
+            token = delta.get("content") or ""
+            if token:
+                yield {"token": token, "done": False}
+
+            if choices[0].get("finish_reason"):
+                yield {"token": "", "done": True}
+                return
+
+        # Stream ended without an explicit [DONE] line or finish_reason.
+        yield {"token": "", "done": True}
+    except requests.exceptions.ConnectionError as e:
+        yield {"token": f"ERROR: Cannot connect to Groq API at {GROQ_API_BASE}. Details: {_redact_api_key(str(e))}", "done": True, "error": True}
+    except requests.exceptions.Timeout:
+        yield {"token": f"ERROR: Groq request timed out after {LLM_TIMEOUT} seconds.", "done": True, "error": True}
+    except requests.exceptions.HTTPError as e:
+        yield {"token": f"ERROR: Groq HTTP {e.response.status_code} - {e.response.reason}. URL: {url}", "done": True, "error": True}
+    except Exception as e:
+        import traceback
+        yield {"token": f"ERROR: Groq stream failed - {_redact_api_key(str(e))}", "done": True, "error": True}
+
+
 def call_docker_llm(messages: List[Dict[str, str]], custom_options: Optional[Dict] = None) -> str:
-    if get_docker_llm_provider() == "gemini":
+    provider = get_docker_llm_provider()
+    if provider == "gemini":
         return call_gemini(messages, custom_options=custom_options)
+    if provider == "groq":
+        return call_groq(messages, custom_options=custom_options)
     return call_llama(messages, custom_options=custom_options)
 
 
 def call_docker_llm_stream(messages: List[Dict[str, str]], custom_options: Optional[Dict] = None):
-    if get_docker_llm_provider() == "gemini":
+    provider = get_docker_llm_provider()
+    if provider == "gemini":
         yield from call_gemini_stream(messages, custom_options=custom_options)
+        return
+    if provider == "groq":
+        yield from call_groq_stream(messages, custom_options=custom_options)
         return
     yield from call_llama_stream(messages, custom_options=custom_options)

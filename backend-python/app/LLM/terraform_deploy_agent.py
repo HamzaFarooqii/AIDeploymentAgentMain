@@ -8,7 +8,7 @@ on a single EC2 instance using docker-compose (no ALB/ELB, no ECS).
 import os
 from typing import Dict, List, Optional
 
-from .llm_client import call_gemini, call_gemini_stream
+from .llm_client import call_docker_llm, call_docker_llm_stream, get_docker_llm_provider
 from ..config.settings import settings
 from ..utils.image_naming import build_service_image
 
@@ -362,14 +362,15 @@ def run_terraform_deploy_chat(
     print(f"Project: {project_name}")
     print(f"Services: {[s.get('name') for s in services]}")
     print(f"Region: {aws_region}")
+    print(f"LLM provider: {get_docker_llm_provider()}")
     print(f"Message (first 500 chars):\n{message[:500]}...")
     print("=" * 40)
-    
-    response = call_gemini([
+
+    response = call_docker_llm([
         {"role": "system", "content": TERRAFORM_DEPLOY_SYSTEM_PROMPT},
         {"role": "user", "content": message},
     ])
-    
+
     # Extract HCL from response (remove markdown fences if present)
     return _extract_hcl_from_response(response)
 
@@ -414,8 +415,9 @@ def run_terraform_deploy_chat_stream(
     print(f"\n=== DEBUG: STREAMING TERRAFORM REQUEST ===")
     print(f"Project: {project_name}")
     print(f"Services: {[s.get('name') for s in services]}")
-    
-    for chunk in call_gemini_stream([
+    print(f"LLM provider: {get_docker_llm_provider()}")
+
+    for chunk in call_docker_llm_stream([
         {"role": "system", "content": TERRAFORM_DEPLOY_SYSTEM_PROMPT},
         {"role": "user", "content": message},
     ]):
@@ -540,14 +542,15 @@ Return ONLY the HCL code, no explanations."""
 
     print(f"\n=== DEBUG: TERRAFORM FIX REQUEST ===")
     print(f"Project: {project_name}")
+    print(f"LLM provider: {get_docker_llm_provider()}")
     print(f"Error (first 500 chars): {error_output[:500]}...")
     print("=" * 40)
-    
-    response = call_gemini([
+
+    response = call_docker_llm([
         {"role": "system", "content": TERRAFORM_FIX_SYSTEM_PROMPT},
         {"role": "user", "content": message},
     ])
-    
+
     return _extract_hcl_from_response(response)
 
 
@@ -576,8 +579,9 @@ Return ONLY the HCL code, no explanations."""
 
     print(f"\n=== DEBUG: STREAMING TERRAFORM FIX ===")
     print(f"Project: {project_name}")
-    
-    for chunk in call_gemini_stream([
+    print(f"LLM provider: {get_docker_llm_provider()}")
+
+    for chunk in call_docker_llm_stream([
         {"role": "system", "content": TERRAFORM_FIX_SYSTEM_PROMPT},
         {"role": "user", "content": message},
     ]):
