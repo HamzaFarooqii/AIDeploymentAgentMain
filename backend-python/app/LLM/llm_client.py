@@ -389,7 +389,7 @@ def call_groq(messages: List[Dict[str, str]], custom_options: Optional[Dict] = N
 
     Groq is free (no credit card required for its free tier) and fast
     (hardware-accelerated inference). The model is configurable via
-    GROQ_MODEL_NAME (see settings.py), defaulting to llama-3.3-70b-versatile.
+    GROQ_MODEL_NAME (see settings.py), defaulting to openai/gpt-oss-120b.
     """
     if not GROQ_API_KEY:
         return "ERROR: GROQ_API_KEY is not set. Set it in backend-python/.env to use Groq."

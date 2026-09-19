@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # be swapped later without a code change.
     GROQ_API_KEY: Optional[str] = None
     GROQ_API_BASE: str = "https://api.groq.com/openai/v1"
-    GROQ_MODEL_NAME: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL_NAME: str = "openai/gpt-oss-120b"
 
     # AWS Deployment Configuration
     AWS_PROFILE: Optional[str] = None  # AWS CLI profile name (e.g., "my-terraform")
