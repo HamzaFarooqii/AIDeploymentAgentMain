@@ -65,6 +65,19 @@ class Settings(BaseSettings):
     GROQ_API_BASE: str = "https://api.groq.com/openai/v1"
     GROQ_MODEL_NAME: str = "openai/gpt-oss-120b"
 
+    # Supabase - not wired into the app yet (Mongo remains the live database),
+    # declared here so .env can hold these without pydantic-settings rejecting
+    # them as unrecognized fields (it validates every .env var against a
+    # declared field by default).
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_PUBLISHABLE_KEY: Optional[str] = None
+    SUPABASE_DB_URL: Optional[str] = None
+    SUPABASE_DB_HOST: Optional[str] = None
+    SUPABASE_DB_PORT: int = 5432
+    SUPABASE_DB_NAME: str = "postgres"
+    SUPABASE_DB_USER: str = "postgres"
+    SUPABASE_DB_PASSWORD: Optional[str] = None
+
     # AWS Deployment Configuration
     AWS_PROFILE: Optional[str] = None  # AWS CLI profile name (e.g., "my-terraform")
     AWS_DEFAULT_REGION: str = "us-east-1"
