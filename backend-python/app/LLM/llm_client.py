@@ -1,7 +1,45 @@
+import re
+import time
 import requests
 from typing import List, Dict, Optional
 
 from ..config.settings import settings
+
+# Matches a `key=...` query-param value (as Google's REST APIs use for the
+# API key) so it can be stripped out of any error text before it's returned
+# to a client or printed to logs - requests' own exception messages include
+# the full request URL, which would otherwise leak the raw key.
+_API_KEY_QUERY_PATTERN = re.compile(r"([?&]key=)[^&\s'\"]+")
+
+
+def _redact_api_key(text: str) -> str:
+    return _API_KEY_QUERY_PATTERN.sub(r"\1***REDACTED***", text)
+
+
+def _request_with_retry(method: str, url: str, *, retries: int = 3, **kwargs) -> requests.Response:
+    """
+    requests.post with a short retry for transient connection-level failures
+    (e.g. an intermittent network blip producing SSLEOFError or a plain
+    ConnectionError). These mean the connection itself failed before any
+    response was received - not the API rejecting the request - so a quick
+    retry with a short backoff often just succeeds. Does not retry on HTTP
+    error responses (4xx/5xx); those are handled by the caller.
+
+    `method` is accepted for clarity at call sites but every call site here
+    uses POST; calling requests.post directly (rather than requests.request)
+    keeps this compatible with tests that patch app.LLM.llm_client.requests.post.
+    """
+    if retries < 1:
+        retries = 1
+    last_exc: Exception = requests.exceptions.ConnectionError("no attempts made")
+    for attempt in range(retries):
+        try:
+            return requests.post(url, **kwargs)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            last_exc = e
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)  # 1s, 2s
+    raise last_exc
 
 # LLM Configuration - loaded from settings
 OLLAMA_URL = settings.OLLAMA_URL
@@ -99,7 +137,8 @@ def call_llama(messages: List[Dict[str, str]], custom_options: Optional[Dict] = 
         if custom_options:
             options.update(custom_options)
         
-        resp = requests.post(
+        resp = _request_with_retry(
+            "POST",
             OLLAMA_URL,
             json={
                 "model": MODEL_NAME,
@@ -110,7 +149,7 @@ def call_llama(messages: List[Dict[str, str]], custom_options: Optional[Dict] = 
             timeout=LLM_TIMEOUT,
         )
         resp.raise_for_status()
-        
+
         # Parse response
         response_text = resp.text.strip()
         
@@ -127,14 +166,14 @@ def call_llama(messages: List[Dict[str, str]], custom_options: Optional[Dict] = 
         
         return data.get("response", "")
     except requests.exceptions.ConnectionError as e:
-        return f"ERROR: Cannot connect to Ollama at {OLLAMA_URL}. Details: {str(e)}"
+        return f"ERROR: Cannot connect to Ollama at {OLLAMA_URL}. Details: {_redact_api_key(str(e))}"
     except requests.exceptions.Timeout:
         return f"ERROR: LLM request timed out after {LLM_TIMEOUT} seconds."
     except requests.exceptions.HTTPError as e:
         return f"ERROR: HTTP {e.response.status_code} - {e.response.reason}. URL: {OLLAMA_URL}"
     except Exception as e:
         import traceback
-        return f"ERROR: LLM call failed - {str(e)}\nTraceback: {traceback.format_exc()[:500]}"
+        return f"ERROR: LLM call failed - {_redact_api_key(str(e))}\nTraceback: {_redact_api_key(traceback.format_exc()[:500])}"
 
 
 def call_llama_stream(messages: List[Dict[str, str]], custom_options: Optional[Dict] = None):
@@ -164,7 +203,8 @@ def call_llama_stream(messages: List[Dict[str, str]], custom_options: Optional[D
             options.update(custom_options)
         
         # Use streaming request
-        resp = requests.post(
+        resp = _request_with_retry(
+            "POST",
             OLLAMA_URL,
             json={
                 "model": MODEL_NAME,
@@ -191,14 +231,14 @@ def call_llama_stream(messages: List[Dict[str, str]], custom_options: Optional[D
                     continue
                     
     except requests.exceptions.ConnectionError as e:
-        yield {"token": f"ERROR: Cannot connect to Ollama at {OLLAMA_URL}. Details: {str(e)}", "done": True, "error": True}
+        yield {"token": f"ERROR: Cannot connect to Ollama at {OLLAMA_URL}. Details: {_redact_api_key(str(e))}", "done": True, "error": True}
     except requests.exceptions.Timeout:
         yield {"token": f"ERROR: LLM request timed out after {LLM_TIMEOUT} seconds.", "done": True, "error": True}
     except requests.exceptions.HTTPError as e:
         yield {"token": f"ERROR: HTTP {e.response.status_code} - {e.response.reason}. URL: {OLLAMA_URL}", "done": True, "error": True}
     except Exception as e:
         import traceback
-        yield {"token": f"ERROR: LLM stream failed - {str(e)}", "done": True, "error": True}
+        yield {"token": f"ERROR: LLM stream failed - {_redact_api_key(str(e))}", "done": True, "error": True}
 
 
 def _call_gemini_once(
@@ -226,7 +266,8 @@ def _call_gemini_once(
     if system_text:
         payload["systemInstruction"] = {"parts": [{"text": system_text}]}
 
-    resp = requests.post(
+    resp = _request_with_retry(
+        "POST",
         url,
         params={"key": GEMINI_API_KEY},
         headers={"Content-Type": "application/json"},
@@ -276,12 +317,12 @@ def call_gemini(messages: List[Dict[str, str]], custom_options: Optional[Dict] =
 
         return result
     except requests.exceptions.ConnectionError as e:
-        return f"ERROR: Cannot connect to Gemini API at {GEMINI_API_BASE}. Details: {str(e)}"
+        return f"ERROR: Cannot connect to Gemini API at {GEMINI_API_BASE}. Details: {_redact_api_key(str(e))}"
     except requests.exceptions.Timeout:
         return f"ERROR: Gemini request timed out after {LLM_TIMEOUT} seconds."
     except Exception as e:
         import traceback
-        return f"ERROR: Gemini call failed - {str(e)}\nTraceback: {traceback.format_exc()[:500]}"
+        return f"ERROR: Gemini call failed - {_redact_api_key(str(e))}\nTraceback: {_redact_api_key(traceback.format_exc()[:500])}"
 
 
 def call_gemini_stream(messages: List[Dict[str, str]], custom_options: Optional[Dict] = None):
