@@ -22,7 +22,13 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8080"
     ]
     ENVIRONMENT: str = "development"
-    
+
+    # JWT signing secret. Must be set via SECRET_KEY in the environment/.env
+    # for any real deployment - the placeholder default below is only safe
+    # for local development and is never a value you should rely on in
+    # production (anyone with it can forge valid auth tokens).
+    SECRET_KEY: str = "your-secret-key-here-change-in-production"
+
     # Docker Hub Credentials - loaded from environment or .env
     # Set `DOCKER_HUB_USERNAME` and `DOCKER_HUB_PASSWORD` in your environment
     DOCKER_HUB_USERNAME: Optional[str] = None
@@ -84,3 +90,6 @@ if settings.DOCKER_HUB_USERNAME and settings.DOCKER_HUB_PASSWORD:
     print("Docker Hub credentials loaded from environment")
 else:
     print("Warning: Docker Hub credentials not set in environment (.env or OS vars)")
+
+if settings.SECRET_KEY == "your-secret-key-here-change-in-production":
+    print("Warning: SECRET_KEY is using the default placeholder - set SECRET_KEY in .env before deploying anywhere real")

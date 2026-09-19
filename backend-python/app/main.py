@@ -1,3 +1,17 @@
+import sys
+
+# Force UTF-8 on stdout/stderr before anything else runs. Several modules in
+# this codebase print emoji in log/status messages (e.g. auth_controller's
+# error logging); on Windows, stdout defaults to the system codepage
+# (cp1252) whenever it isn't attached to a real UTF-8-capable console -
+# including when redirected to a file/pipe, as in a typical background
+# server launch - which raises UnicodeEncodeError and crashes the request
+# instead of the print just working.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, status
